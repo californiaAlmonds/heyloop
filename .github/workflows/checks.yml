@@ -32,8 +32,6 @@ jobs:
     name: Daemon smoke
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      HEYLOOP_HOME: ${{ runner.temp }}/heyloop-ci
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -43,6 +41,8 @@ jobs:
       - run: npm ci
       - name: Start daemon and test
         shell: bash
+        env:
+          HEYLOOP_HOME: ${{ runner.temp }}/heyloop-ci
         run: |
           npm run cli -w @heyloop/daemon -- start > "$RUNNER_TEMP/heyloop-daemon.log" 2>&1 &
           daemon_pid=$!
