@@ -6,7 +6,7 @@ Updated: 2026-10-02
 Phase 1 (MVP): daemon **done** · relay **done (local)** · Android app **in progress** (pairing + chat list + read-only conversation)
 
 ## Working
-- npm-workspaces monorepo: `packages/protocol`, `apps/daemon`, `apps/relay`, `apps/mobile`. Repo at `E:\heyloop`, branch `main`.
+- npm-workspaces monorepo: `packages/protocol`, `apps/daemon`, `apps/relay`, `apps/mobile`. Repo at `E:\heyloop`; ongoing work on `develop-californiaAlmonds` (tracks origin).
 - Daemon on `127.0.0.1:4519/mcp` (bearer token + Host allowlist); config/token/db in `~/.heyloop` (`HEYLOOP_HOME` overrides).
 - MCP tools: `send_status_update` (returns inbox), `ask_human_approval` (blocks ≤55s, then `pending`), `await_human_response`. Desktop answers via MCP elicitation.
 - Approval broker: first answer wins (409 late), expiry sweeper → `on_timeout`, chat status tracks `waiting_input`.
@@ -25,6 +25,8 @@ Phase 1 (MVP): daemon **done** · relay **done (local)** · Android app **in pro
 - Root `package.json` `overrides` pin `react`/`react-dom` to `19.2.3` (Expo SDK 57) so `react@*` peers don't install a second copy.
 - Verified: workspace typecheck, `expo-doctor` 21/21, `expo export --platform android` bundles. Not yet run on a device.
 - GitHub repo `californiaAlmonds/heyloop` is public; four existing commits pushed unchanged, `origin/main` configured.
+- Branch policy: `develop-californiaAlmonds` updates restricted to personal-repo owner (admin bypass); `main` requires PRs, up-to-date Typecheck + Daemon smoke checks, resolved conversations; admins enforced, no force pushes/deletion. No mandatory second-person review.
+- `.github/workflows/checks.yml` runs on every main PR and main/develop pushes. Smoke test asserts tool names, inbox delivery, pending/answered approvals, and 409 late answers; isolated local run + typecheck pass.
 - README documents setup, CLI, security, limitations, and roadmap. `docs/site/index.html` is the responsive glass-style product website (phone preview labeled concept).
 - GitHub Pages enabled with Actions source at `https://californiaalmonds.github.io/heyloop/`; workflow publishes only `docs/site` on relevant `main` pushes.
 - Verification: workspace typecheck passes; website anchors, image loading, copy/FAQ controls, and overflow/phone spacing checks pass at 320/390/768/1440px.

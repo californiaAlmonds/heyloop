@@ -104,6 +104,10 @@ Coding agent -- MCP --> Local daemon <-- encrypted WSS --> Relay <--> Phone
 
 ## Development
 
+Use `develop-californiaAlmonds` for the owner's ongoing work. GitHub restricts updates to this branch to the repository admin; in this personal repository, that is `californiaAlmonds`. Other contributors should work in their own branches or forks.
+
+Changes to `main` require a pull request, an up-to-date branch, passing **Typecheck** and **Daemon smoke** checks, and resolved review conversations. Direct pushes, force pushes, and deletion are blocked, including for the owner. A second-person review is not required for this single-maintainer repository. The checks run for every PR to `main`, without path filters.
+
 ```sh
 npm run typecheck
 # With the daemon running:
