@@ -26,3 +26,6 @@ Append-only. One line per decision: date — decision — why.
 - 2026-10-02 — Relay auth is the first WebSocket frame, not headers — browsers/RN can't reliably set WS headers; daemon claims the room on first use.
 - 2026-10-02 — Daemon doesn't queue outbound frames; it drops them when offline and the phone re-syncs by cursor — daemon is source of truth.
 - 2026-10-02 — Relay queue capped at 2000 per role, oldest dropped — safe because the phone can always re-sync from the daemon.
+- 2026-10-02 — Expo hosted project is `@heyloop-californiaalmonds/heyloop`, linked to GitHub `californiaAlmonds`; keep Firebase credentials in ignored local storage — prepare Android builds without committing private keys.
+- 2026-10-02 — Firebase project `heyloop-e3808`, Android package `com.californiaalmonds.heyloop`; Spark plan, no Analytics/Gemini — FCM needs neither billing nor analytics.
+- 2026-10-02 — Dedicated `heyloop-fcm-sender` service account with Firebase Cloud Messaging API Admin only — push sender does not need broad Firebase Admin permissions; direct FCM relay design unchanged.

@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "HeyLoop",
+    "slug": "heyloop",
+    "scheme": "heyloop",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.californiaalmonds.heyloop"
+    },
+    "android": {
+      "package": "com.californiaalmonds.heyloop",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "145fea2a-0d75-41a7-b415-67fceef9ebad"
+      }
+    },
+    "owner": "heyloop-californiaalmonds"
+  }
+}

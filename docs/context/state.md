@@ -16,6 +16,11 @@ Phase 1 (MVP): daemon **done** · relay **done (local)** · Android app **next**
 - Relay (Worker + Durable Object per room): first-frame auth, TOFU room claim by daemon, forwards ciphertext, per-role queue (cap 2000) until ack, peer online/offline frames, ping/pong auto-response.
 - Daemon relay client: outbound WSS with backoff, live-forwards envelopes + chat changes, handles phone `sync`/`answer`/`say`/`rename`/`presence`, dedupes phone frames in SQLite.
 - Tests: `smoke` (local) and `smoke:relay` (simulated phone) all pass.
+- Expo organization `heyloop-californiaalmonds`, project `heyloop` (EAS ID `145fea2a-0d75-41a7-b415-67fceef9ebad`), linked from `apps/mobile/app.json`.
+- Firebase `heyloop-e3808` (Spark plan, FCM HTTP v1). Android package `com.californiaalmonds.heyloop`.
+- Firebase Android config + messaging-only service-account key in ignored `.credentials/firebase/`. Expo key upload pending manual file selection. Personal setup notes in ignored `docs/context/cloud-setup.md`.
+- `apps/mobile`: Expo SDK 57 blank TypeScript scaffold; `app.config.ts` reads `GOOGLE_SERVICES_JSON` (EAS file env) or the local `.credentials` path.
+- GitHub repo `californiaAlmonds/heyloop` (public) created, nothing pushed yet (author-email decision pending).
 
 ## Next
 1. Android app (Expo dev build): QR pairing, chat list with status dots, conversation view, approval sheet, reply, rename; local cache with per-chat `seq` cursors.
