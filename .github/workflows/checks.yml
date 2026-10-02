@@ -1,0 +1,62 @@
+name: PR checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, develop-californiaAlmonds]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+
+  smoke:
+    name: Daemon smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      HEYLOOP_HOME: ${{ runner.temp }}/heyloop-ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Start daemon and test
+        shell: bash
+        run: |
+          npm run cli -w @heyloop/daemon -- start > "$RUNNER_TEMP/heyloop-daemon.log" 2>&1 &
+          daemon_pid=$!
+          trap 'kill "$daemon_pid" 2>/dev/null || true' EXIT
+          node --input-type=module <<'NODE'
+          import { setTimeout } from 'node:timers/promises';
+          let ready = false;
+          for (let attempt = 0; attempt < 30; attempt++) {
+            try {
+              const response = await fetch('http://127.0.0.1:4519/mcp', { signal: AbortSignal.timeout(1000) });
+              if (response.status === 401) { ready = true; break; }
+            } catch {}
+            await setTimeout(250);
+          }
+          if (!ready) throw new Error('Daemon did not become ready');
+          NODE
+          npm run smoke -w @heyloop/daemon

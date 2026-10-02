@@ -1,3 +1,4 @@
+- 2026-10-02 — Ongoing owner work uses `develop-californiaAlmonds`; main requires PRs with Typecheck, Daemon smoke, up-to-date head, and resolved conversations, including for admins; no mandatory review — enforce merge safety without blocking a solo maintainer. Development branch update restriction bypass is repository admin (only owner in personal repo).
 # Decisions Log
 
 Append-only. One line per decision: date — decision — why.
