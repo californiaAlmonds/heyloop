@@ -69,6 +69,16 @@ export interface PairingLink {
   name: string;
 }
 
+/** Returns the relay origin; only https, or http on loopback for local development. */
+export function normalizeRelayUrl(input: string): string {
+  const url = new URL(input);
+  const loopback = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
+  if (url.protocol !== 'https:' && !(loopback && url.protocol === 'http:')) {
+    throw new Error('Relay URL must use https:// (http:// is allowed only for localhost).');
+  }
+  return url.origin;
+}
+
 export function formatPairingLink({ relay, secret, name }: PairingLink): string {
   const q = new URLSearchParams({ v: '1', r: relay, s: secret, n: name });
   return `heyloop://pair?${q.toString()}`;
@@ -80,5 +90,7 @@ export function parsePairingLink(link: string): PairingLink {
   const relay = url.searchParams.get('r');
   const secret = url.searchParams.get('s');
   if (!relay || !secret) throw new Error('Pairing link is missing fields');
-  return { relay, secret, name: url.searchParams.get('n') ?? 'Computer' };
+  if (fromBase64Url(secret).length !== 32) throw new Error('Pairing secret must be 32 bytes');
+  const name = (url.searchParams.get('n') ?? 'Computer').slice(0, 80);
+  return { relay: normalizeRelayUrl(relay), secret, name };
 }

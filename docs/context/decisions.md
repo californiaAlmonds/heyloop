@@ -29,4 +29,10 @@ Append-only. One line per decision: date — decision — why.
 - 2026-10-02 — Expo hosted project is `@heyloop-californiaalmonds/heyloop`, linked to GitHub `californiaAlmonds`; keep Firebase credentials in ignored local storage — prepare Android builds without committing private keys.
 - 2026-10-02 — Firebase project `heyloop-e3808`, Android package `com.californiaalmonds.heyloop`; Spark plan, no Analytics/Gemini — FCM needs neither billing nor analytics.
 - 2026-10-02 — Dedicated `heyloop-fcm-sender` service account with Firebase Cloud Messaging API Admin only — push sender does not need broad Firebase Admin permissions; direct FCM relay design unchanged.
+- 2026-10-02 — Mobile uses Expo Router + a single `useSyncExternalStore` client (no state library) — small app, one data source (relay).
+- 2026-10-02 — Relay URL rule (https, or http only on loopback) lives in `protocol/crypto` `normalizeRelayUrl`; `parsePairingLink` enforces it — QR/deep links are untrusted input on the phone.
+- 2026-10-02 — Deep-link and scanned pairing both require an explicit confirm screen — any app can fire `heyloop://pair` and silently re-pair otherwise.
+- 2026-10-02 — Phone syncs on daemon `peer online` (not on `ready`) with contiguous cursors — covers initial connect and daemon reconnects; gaps self-heal.
+- 2026-10-02 — Metro resolver maps `./x.js` → `.ts` instead of changing protocol imports — keeps NodeNext ESM for daemon/relay.
+- 2026-10-02 — Root npm `overrides` pin `react`/`react-dom` to the Expo SDK version — Expo `react@*` peers hoisted 19.3.0, causing duplicate React; bump overrides with each SDK upgrade.
 - 2026-10-02 — Public website is dependency-free static HTML in `docs/site`, deployed with GitHub Pages Actions; phone illustration explicitly labeled a concept — no build toolchain or false claims of mobile readiness.

@@ -21,13 +21,14 @@ HeyLoop connects long-running AI coding agents on a computer to a Telegram-style
 - Smoke test (daemon running): `npm run smoke -w @heyloop/daemon`
 - Relay locally: `npm run dev -w @heyloop/relay` (port 8787, no Cloudflare account needed); pair a test home with `heyloop pair --relay http://127.0.0.1:8787`, restart the daemon, then `npm run smoke:relay -w @heyloop/daemon`.
 - Use a throwaway data dir for tests: `$env:HEYLOOP_HOME = "$env:TEMP\heyloop-test"`; delete it afterwards.
+- Mobile (from `apps/mobile`): `npx expo start` (Expo Go or dev build); `npx expo export --platform android` checks the bundle without a device. Phone reaches a local relay via `adb reverse tcp:8787 tcp:8787`.
 - Shell is Windows PowerShell 5.1: chain with `;`, never `&&`.
 
 ## Layout
 - `packages/protocol` — zod schemas for messages and MCP tool contracts (`.`), relay/app frames (`./relay`), pairing + encryption (`./crypto`, tweetnacl). **Single source of truth**: change contracts here first, then implementations. Don't re-export `relay`/`crypto` from `index.ts` (circular import).
 - `apps/daemon` — MCP server (Streamable HTTP), SQLite store, approval broker, local REST API, relay client, CLI.
 - `apps/relay` — Cloudflare Worker + SQLite-backed Durable Object per pairing room; forwards and queues ciphertext.
-- Planned: `apps/mobile` (Expo, Android first).
+- Planned: push notifications, VS Code extension.
 
 ## Conventions
 - TypeScript strict, ESM, `moduleResolution: NodeNext` — relative imports use `.js` extensions. Run TS directly with `tsx`; packages export `src/*.ts`.

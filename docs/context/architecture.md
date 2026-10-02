@@ -18,7 +18,7 @@ flowchart LR
 | `packages/protocol` | done | Message envelope, chat/status types, MCP tool input/output schemas |
 | `apps/daemon` | done (local) | MCP server, request lifecycle, history, desktop prompts, CLI |
 | `apps/relay` | done (local) | Pairing rooms, encrypted message queue; later push fan-out and remote MCP endpoint (claude.ai/ChatGPT) |
-| `apps/mobile` | scaffolded | Expo Android scaffold; chats, notifications, and approvals still planned |
+| `apps/mobile` | in progress | Pairing, chat list, read-only conversation done; next approvals/reply/rename, cache, notifications, terminal view |
 | `docs/site` | static website | Product page and quick start; GitHub Pages Actions deploys this directory only |
 | VS Code extension | phase 2 | Start chats from phone, window-focus presence |
 

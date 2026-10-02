@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import QRCode from 'qrcode';
-import { formatPairingLink, newPairingSecret } from '@heyloop/protocol/crypto';
+import { formatPairingLink, newPairingSecret, normalizeRelayUrl } from '@heyloop/protocol/crypto';
 import { loadConfig, saveConfig, type Config } from './config.js';
 import { startDaemon } from './server.js';
 
@@ -87,12 +87,7 @@ function setupVscode(config: Config, dir: string): void {
 
 async function pair(config: Config, relayUrl: string | undefined): Promise<void> {
   if (relayUrl) {
-    const url = new URL(relayUrl);
-    const loopback = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
-    if (url.protocol !== 'https:' && !(loopback && url.protocol === 'http:')) {
-      throw new Error('Relay URL must use https:// (http:// is allowed only for localhost).');
-    }
-    config.relay = { url: url.origin, secret: newPairingSecret() };
+    config.relay = { url: normalizeRelayUrl(relayUrl), secret: newPairingSecret() };
     saveConfig(config);
   }
   if (!config.relay) throw new Error('Not paired. Run: heyloop pair --relay <url>');
