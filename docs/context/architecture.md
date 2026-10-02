@@ -17,7 +17,7 @@ flowchart LR
 |---|---|---|
 | `packages/protocol` | done | Message envelope, chat/status types, MCP tool input/output schemas |
 | `apps/daemon` | done (local) | MCP server, request lifecycle, history, desktop prompts, CLI |
-| `apps/relay` | planned | Pairing, encrypted message queue, push fan-out, remote MCP endpoint (claude.ai/ChatGPT) |
+| `apps/relay` | done (local) | Pairing rooms, encrypted message queue; later push fan-out and remote MCP endpoint (claude.ai/ChatGPT) |
 | `apps/mobile` | planned | Chats, status dots, rename, notifications, approvals, terminal view, new chat |
 | VS Code extension | phase 2 | Start chats from phone, window-focus presence |
 
@@ -28,6 +28,14 @@ flowchart LR
 
 ## Approval lifecycle
 `pending → answered | expired | cancelled`. Resolution is a compare-and-set in SQLite (first answer wins). Every resolution appends `approval_resolved` so all clients can withdraw stale prompts.
+
+## Relay wire protocol
+Contracts: [packages/protocol/src/relay.ts](../../packages/protocol/src/relay.ts), [crypto.ts](../../packages/protocol/src/crypto.ts).
+- Connect `wss://<relay>/rooms/<room>/ws?role=daemon|phone`; first frame `{t:'auth', token}`; relay replies `ready` + `peer` status, then drains the queue.
+- `{t:'send', data}` → relay stores for the other role and forwards as `{t:'msg', id, data}`; receiver replies `{t:'ack', id}` to delete.
+- `data` = base64url(nonce ‖ secretbox(JSON app frame)).
+- Daemon → phone: `chats` (upsert list + machine), `envelopes` (batch), `result` (ref to phone frame id).
+- Phone → daemon: `sync` (per-chat cursors), `answer`, `say`, `rename`, `presence`; each has a ULID `id` for dedupe.
 
 ## Routing (target, needs relay)
 1. Away toggle on, screen locked, or idle >2 min → phone immediately.

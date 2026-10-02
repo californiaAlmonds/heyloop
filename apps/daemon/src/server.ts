@@ -7,6 +7,7 @@ import { AnsweredVia } from '@heyloop/protocol';
 import { ApprovalBroker } from './broker.js';
 import { dataDir, type Config } from './config.js';
 import { createMcpServer } from './mcp.js';
+import { RelayClient } from './relay-client.js';
 import { Store } from './store.js';
 
 const MAX_BODY_BYTES = 1_000_000;
@@ -148,5 +149,8 @@ export function startDaemon(config: Config): Server {
   });
 
   server.listen(config.port, '127.0.0.1');
+  if (config.relay) {
+    new RelayClient(config.relay, { id: config.machine_id, name: config.machine_name }, store, broker).start();
+  }
   return server;
 }

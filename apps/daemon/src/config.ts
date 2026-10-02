@@ -9,6 +9,7 @@ export interface Config {
   token: string;
   machine_id: string;
   machine_name: string;
+  relay?: { url: string; secret: string };
 }
 
 export const DEFAULT_PORT = 4519;
@@ -36,4 +37,8 @@ export function loadConfig(): Config {
   };
   writeFileSync(path, JSON.stringify(config, null, 2), { mode: 0o600 });
   return config;
+}
+
+export function saveConfig(config: Config): void {
+  writeFileSync(configPath(), JSON.stringify(config, null, 2), { mode: 0o600 });
 }

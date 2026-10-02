@@ -8,12 +8,17 @@
     "dev": "tsx watch src/cli.ts start",
     "cli": "tsx src/cli.ts",
     "smoke": "tsx scripts/smoke.ts",
+    "smoke:relay": "tsx scripts/relay-smoke.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
     "@heyloop/protocol": "*",
     "@modelcontextprotocol/sdk": "^1.31.0",
+    "qrcode": "^1.5.4",
     "ulid": "^3.0.0",
     "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.6"
   }
 }

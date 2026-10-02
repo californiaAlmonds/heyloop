@@ -19,13 +19,15 @@ HeyLoop connects long-running AI coding agents on a computer to a Telegram-style
 - Typecheck: `npm run typecheck`
 - Run daemon: `npm run cli -w @heyloop/daemon -- start`
 - Smoke test (daemon running): `npm run smoke -w @heyloop/daemon`
+- Relay locally: `npm run dev -w @heyloop/relay` (port 8787, no Cloudflare account needed); pair a test home with `heyloop pair --relay http://127.0.0.1:8787`, restart the daemon, then `npm run smoke:relay -w @heyloop/daemon`.
 - Use a throwaway data dir for tests: `$env:HEYLOOP_HOME = "$env:TEMP\heyloop-test"`; delete it afterwards.
 - Shell is Windows PowerShell 5.1: chain with `;`, never `&&`.
 
 ## Layout
-- `packages/protocol` — zod schemas for messages and MCP tool contracts. **Single source of truth**: change contracts here first, then implementations.
-- `apps/daemon` — MCP server (Streamable HTTP), SQLite store, approval broker, local REST API, CLI.
-- Planned: `apps/relay` (Cloudflare Worker + Durable Objects), `apps/mobile` (Expo, Android first).
+- `packages/protocol` — zod schemas for messages and MCP tool contracts (`.`), relay/app frames (`./relay`), pairing + encryption (`./crypto`, tweetnacl). **Single source of truth**: change contracts here first, then implementations. Don't re-export `relay`/`crypto` from `index.ts` (circular import).
+- `apps/daemon` — MCP server (Streamable HTTP), SQLite store, approval broker, local REST API, relay client, CLI.
+- `apps/relay` — Cloudflare Worker + SQLite-backed Durable Object per pairing room; forwards and queues ciphertext.
+- Planned: `apps/mobile` (Expo, Android first).
 
 ## Conventions
 - TypeScript strict, ESM, `moduleResolution: NodeNext` — relative imports use `.js` extensions. Run TS directly with `tsx`; packages export `src/*.ts`.
@@ -44,6 +46,7 @@ HeyLoop connects long-running AI coding agents on a computer to a Telegram-style
 - HeyLoop tools set `readOnlyHint: true` so VS Code doesn't confirm each call; `openWorldHint: true` would make VS Code confirm results.
 - VS Code's own "Allow" prompts are invisible to HeyLoop. Settings: `chat.tools.terminal.enableAutoApprove`, `chat.tools.terminal.autoApprove`; warn against `chat.tools.global.autoApprove`.
 - `node:sqlite` prints an ExperimentalWarning — expected.
+- After moving/renaming the repo folder, run `npm install` to fix workspace symlinks before typechecking.
 
 ## Context tracking (required)
 At the end of every task that changes code, design, or plans, update `docs/context/` before replying (or run `/wrap-up`):

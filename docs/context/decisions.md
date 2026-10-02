@@ -21,3 +21,8 @@ Append-only. One line per decision: date — decision — why.
 - 2026-10-02 — HeyLoop tools annotated `readOnlyHint: true` — VS Code otherwise confirms every call.
 - 2026-10-02 — Stack: TypeScript, npm workspaces, zod v4, MCP SDK 1.31, built-in `node:sqlite`, Streamable HTTP on localhost — no native deps on Windows.
 - 2026-10-02 — Context persists in `docs/context/` (state/decisions/architecture) — VS Code repo memory was lost on folder rename.
+- 2026-10-02 — Pairing = one 32-byte secret in the QR; room id, relay auth token and encryption key are derived from it — one scan, relay never gets the key.
+- 2026-10-02 — Encryption via tweetnacl secretbox — pure JS, works in Node, Workers and React Native.
+- 2026-10-02 — Relay auth is the first WebSocket frame, not headers — browsers/RN can't reliably set WS headers; daemon claims the room on first use.
+- 2026-10-02 — Daemon doesn't queue outbound frames; it drops them when offline and the phone re-syncs by cursor — daemon is source of truth.
+- 2026-10-02 — Relay queue capped at 2000 per role, oldest dropped — safe because the phone can always re-sync from the daemon.

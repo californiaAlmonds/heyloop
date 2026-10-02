@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -72,6 +73,10 @@ CREATE TABLE IF NOT EXISTS approvals (
   answered_at TEXT
 );
 CREATE INDEX IF NOT EXISTS approvals_pending ON approvals (status, expires_at);
+CREATE TABLE IF NOT EXISTS inbound_frames (
+  id TEXT PRIMARY KEY,
+  ts TEXT NOT NULL
+);
 `;
 
 const now = () => new Date().toISOString();
@@ -106,10 +111,11 @@ function toApproval(r: Row): ApprovalRecord {
   };
 }
 
-export class Store {
+export class Store extends EventEmitter<{ envelope: [Envelope]; chat: [Chat] }> {
   private db: DatabaseSync;
 
   constructor(dir: string, private machineId: string) {
+    super();
     mkdirSync(dir, { recursive: true });
     this.db = new DatabaseSync(join(dir, 'heyloop.db'));
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
@@ -131,6 +137,7 @@ export class Store {
     this.db
       .prepare('INSERT INTO chats VALUES (?, ?, ?, ?, 0, ?, ?, ?)')
       .run(chat.chat_id, chat.machine_id, chat.source, chat.title, chat.status, ts, ts);
+    this.emit('chat', chat);
     return chat;
   }
 
@@ -149,13 +156,21 @@ export class Store {
     } else {
       this.db.prepare('UPDATE chats SET last_heartbeat = ? WHERE chat_id = ?').run(now(), chatId);
     }
+    this.emitChat(chatId);
   }
 
   renameChat(chatId: string, title: string, byUser: boolean): boolean {
     const sql = byUser
       ? 'UPDATE chats SET title = ?, title_locked = 1 WHERE chat_id = ?'
       : 'UPDATE chats SET title = ? WHERE chat_id = ? AND title_locked = 0';
-    return this.db.prepare(sql).run(title, chatId).changes === 1;
+    const changed = this.db.prepare(sql).run(title, chatId).changes === 1;
+    if (changed) this.emitChat(chatId);
+    return changed;
+  }
+
+  private emitChat(chatId: string): void {
+    const chat = this.getChat(chatId);
+    if (chat) this.emit('chat', chat);
   }
 
   append(chatId: string, sender: Sender, body: MessageBody): Envelope {
@@ -166,6 +181,7 @@ export class Store {
     this.db
       .prepare('INSERT INTO messages (id, chat_id, seq, ts, sender, kind, body) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(env.id, chatId, seq, env.ts, sender, body.kind, JSON.stringify(body));
+    this.emit('envelope', env);
     return env;
   }
 
@@ -196,6 +212,11 @@ export class Store {
       mark.run(r.id as string);
       return { id: r.id as string, ts: r.ts as string, text: (JSON.parse(r.body as string) as { text: string }).text };
     });
+  }
+
+  /** Records an inbound frame id; returns false if it was already processed. */
+  markProcessed(frameId: string): boolean {
+    return this.db.prepare('INSERT OR IGNORE INTO inbound_frames VALUES (?, ?)').run(frameId, now()).changes === 1;
   }
 
   createApproval(rec: Omit<ApprovalRecord, 'status'>): ApprovalRecord {

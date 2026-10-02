@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { loadConfig, type Config } from './config.js';
+import QRCode from 'qrcode';
+import { formatPairingLink, newPairingSecret } from '@heyloop/protocol/crypto';
+import { loadConfig, saveConfig, type Config } from './config.js';
 import { startDaemon } from './server.js';
 
 const USAGE = `heyloop <command>
@@ -8,6 +10,9 @@ const USAGE = `heyloop <command>
   start                         Run the daemon (MCP server + local API)
   token                         Print the daemon token for MCP clients
   setup vscode [dir]            Add HeyLoop to <dir>/.vscode/mcp.json (default: current folder)
+  pair --relay <url>            Create a new phone pairing (replaces the old one)
+  pair                          Show the current pairing QR code again
+  unpair                        Remove the phone pairing
   chats                         List chats
   pending                       List pending approval requests
   answer <request_id> <option>  Answer with an option id (e.g. approve, reject)
@@ -80,6 +85,24 @@ function setupVscode(config: Config, dir: string): void {
   console.log(VSCODE_NOTICE);
 }
 
+async function pair(config: Config, relayUrl: string | undefined): Promise<void> {
+  if (relayUrl) {
+    const url = new URL(relayUrl);
+    const loopback = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
+    if (url.protocol !== 'https:' && !(loopback && url.protocol === 'http:')) {
+      throw new Error('Relay URL must use https:// (http:// is allowed only for localhost).');
+    }
+    config.relay = { url: url.origin, secret: newPairingSecret() };
+    saveConfig(config);
+  }
+  if (!config.relay) throw new Error('Not paired. Run: heyloop pair --relay <url>');
+
+  const link = formatPairingLink({ relay: config.relay.url, secret: config.relay.secret, name: config.machine_name });
+  console.log(await QRCode.toString(link, { type: 'terminal', small: true }));
+  console.log('Scan with the HeyLoop app. Treat this code like a password.');
+  if (relayUrl) console.log('Restart the daemon to connect with the new pairing.');
+}
+
 async function main(argv: string[]): Promise<void> {
   const [cmd, ...rest] = argv;
   const config = loadConfig();
@@ -98,6 +121,16 @@ async function main(argv: string[]): Promise<void> {
     }
     case 'token':
       console.log(config.token);
+      return;
+    case 'pair': {
+      const i = rest.indexOf('--relay');
+      await pair(config, i >= 0 ? rest[i + 1] : undefined);
+      return;
+    }
+    case 'unpair':
+      delete config.relay;
+      saveConfig(config);
+      console.log('Pairing removed. Restart the daemon to disconnect.');
       return;
     case 'setup':
       if (rest[0] !== 'vscode') throw new Error('Usage: heyloop setup vscode [dir]');
