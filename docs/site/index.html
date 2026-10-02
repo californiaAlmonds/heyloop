@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#eef3ef">
+  <meta name="description" content="HeyLoop connects long-running AI coding agents on your computer to your phone. Local-first, self-hosted, and encrypted.">
+  <meta property="og:title" content="HeyLoop | Stay in the loop">
+  <meta property="og:description" content="Your agents keep working. You keep living. A local-first connection between your coding agents and your phone.">
+  <meta property="og:type" content="website">
+  <title>HeyLoop | Stay in the loop</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;450;500;550;600;650;700&display=swap" rel="stylesheet">
+  <style>
+    :root { --ink: #182721; --muted: #586960; --green: #246c4b; --line: #d6e1da; --paper: #f7f9f6; }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; scroll-padding-top: 88px; }
+    body { margin: 0; background: var(--paper); color: var(--ink); font-family: 'DM Sans', sans-serif; letter-spacing: 0; -webkit-font-smoothing: antialiased; }
+    a { color: inherit; text-decoration: none; }
+    button { font: inherit; }
+    a:focus-visible, button:focus-visible, summary:focus-visible { outline: 3px solid #357a59; outline-offset: 5px; }
+    .wrap { width: min(1100px, calc(100% - 64px)); margin-inline: auto; }
+    header { position: absolute; top: 0; z-index: 5; width: 100%; border-bottom: 1px solid #ffffff70; background: #f7faf54d; backdrop-filter: blur(24px); }
+    nav { min-height: 76px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-size: 21px; font-weight: 700; }
+    .mark { display: inline-block; width: 24px; height: 24px; border: 6px solid currentColor; border-radius: 50%; position: relative; }
+    .mark::after { content: ''; position: absolute; height: 8px; width: 8px; bottom: -6px; right: -6px; background: currentColor; border-radius: 50%; border: 2px solid #edf2eb; }
+    .nav-links { display: flex; gap: 30px; align-items: center; font-size: 13px; font-weight: 550; }
+    .nav-links a:hover, footer a:hover { color: var(--green); }
+    .hero { min-height: 850px; height: min(940px, calc(100svh - 55px)); position: relative; overflow: hidden; background: #e2ece5 url('https://images.unsplash.com/photo-1470770841072-f978cf4d019e?auto=format&fit=crop&w=2400&q=85') center 57% / cover; }
+    .hero::before { content: ''; position: absolute; inset: 0; background: #edf4edb8; }
+    .hero-content { position: relative; padding-top: 123px; text-align: center; }
+    .eyebrow { font-size: 11px; text-transform: uppercase; font-weight: 650; letter-spacing: 0; color: var(--green); }
+    h1 { font-size: 88px; line-height: 1.05; margin: 15px 0 14px; font-weight: 550; }
+    .hero-copy { font-size: 21px; line-height: 1.5; margin: 0 auto; max-width: 500px; }
+    .hero-copy span { color: #41574a; }
+    .actions { display: flex; justify-content: center; align-items: center; gap: 24px; margin-top: 27px; }
+    .primary { background: var(--ink); color: white; padding: 13px 22px; border-radius: 6px; font-size: 13px; font-weight: 550; transition: background .2s; }
+    .primary:hover { background: var(--green); }
+    .source { font-size: 13px; font-weight: 600; border-bottom: 1px solid #87988d; padding: 5px 0; }
+    .scene { position: relative; margin: 35px auto 0; width: min(640px, 100%); height: 369px; }
+    .phone { width: 286px; height: 355px; margin: auto; text-align: left; background: #f9fcf6a6; border: 1px solid #ffffffe6; border-radius: 30px; padding: 16px; box-shadow: 0 24px 55px #1a392824, inset 0 0 0 5px #ffffff38; backdrop-filter: blur(28px); transform: rotate(-3deg); }
+    .phone-top { display: flex; justify-content: space-between; padding: 2px 6px 14px; font-size: 10px; font-weight: 600; }
+    .island { width: 71px; height: 15px; border-radius: 15px; background: #1b2921; position: absolute; left: 50%; top: 17px; transform: translateX(-50%); }
+    .chat-head { display: flex; gap: 10px; align-items: center; padding: 8px 0 10px; border-bottom: 1px solid #b6c9bd75; }
+    .agent-avatar { width: 33px; height: 33px; display: grid; place-items: center; background: #dce9dc; border-radius: 8px; font-size: 13px; font-weight: 650; }
+    .chat-title { font-size: 12px; font-weight: 650; margin-bottom: 3px; }
+    .chat-status { font-size: 9px; color: var(--green); }
+    .dot { display: inline-block; width: 5px; height: 5px; margin-right: 4px; border-radius: 50%; background: #3d8d63; }
+    .timestamp { text-align: center; color: #708275; font-size: 8px; margin: 9px 0; }
+    .bubble { border-radius: 8px; padding: 9px; font-size: 10px; line-height: 1.6; background: #ffffffa8; border: 1px solid #ffffff9e; }
+    .bubble + .bubble { margin-top: 9px; }
+    .approval-label { display: flex; justify-content: space-between; font-size: 8px; font-weight: 650; color: #687c6c; margin-bottom: 5px; }
+    .bubble code { display: block; background: #e7ede680; padding: 5px 7px; margin-top: 7px; border-radius: 3px; font-size: 9px; }
+    .mock-answer { margin-top: 10px; padding: 7px; background: #286348; color: white; text-align: center; border-radius: 4px; font-weight: 550; }
+    .reply { margin: 8px 0 0 62px; background: #d6e7d9; padding: 7px 12px; border-radius: 8px; font-size: 10px; }
+    .float-note { position: absolute; left: 5px; top: 91px; text-align: left; background: #ffffffa6; backdrop-filter: blur(18px); border: 1px solid #ffffffdc; border-radius: 8px; box-shadow: 0 12px 30px #22452e12; padding: 14px 19px; transform: rotate(-5deg); }
+    .note-title { font-size: 11px; font-weight: 650; margin-bottom: 5px; }
+    .note-sub { font-size: 10px; color: var(--muted); }
+    .privacy-note { left: auto; right: 1px; top: 236px; transform: rotate(4deg); }
+    .concept { position: relative; margin: 7px 0 0; font-size: 10px; color: #435c4c; }
+    .hero-foot { position: relative; display: flex; justify-content: center; gap: 30px; font-size: 10px; font-weight: 550; margin-top: 20px; }
+    .section { padding: 83px 0; }
+    .section-label { font-size: 11px; color: var(--green); margin-bottom: 20px; font-weight: 650; }
+    h2 { font-size: 39px; line-height: 1.2; font-weight: 500; margin: 0 0 20px; max-width: 660px; }
+    .lead { font-size: 16px; line-height: 1.8; color: var(--muted); max-width: 580px; margin: 0; }
+    .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 44px; margin-top: 54px; }
+    .feature { border-top: 1px solid var(--line); padding-top: 22px; }
+    .number { color: #8c9b91; font-size: 11px; }
+    h3 { font-size: 18px; font-weight: 550; margin: 15px 0 10px; }
+    .feature p { font-size: 13px; line-height: 1.8; color: var(--muted); margin: 0; }
+    .architecture { background: #e9efeb; border-block: 1px solid var(--line); }
+    .flow { display: grid; grid-template-columns: 1fr 48px 1fr 48px 1fr; align-items: start; margin-top: 40px; gap: 12px; }
+    .flow-step { padding-top: 15px; border-top: 2px solid #9db3a5; }
+    .flow-step strong { font-size: 15px; font-weight: 550; }
+    .flow-step p { font-size: 12px; line-height: 1.7; color: var(--muted); }
+    .connector { padding-top: 16px; text-align: center; color: #688471; font-size: 20px; }
+    .setup { display: grid; grid-template-columns: .9fr 1.1fr; gap: 70px; align-items: start; }
+    .setup > div { min-width: 0; }
+    .setup h2 { font-size: 36px; }
+    .availability { margin-top: 28px; font-size: 12px; line-height: 1.8; color: var(--muted); }
+    .terminal { background: #192a23; color: #e6eee8; border-radius: 8px; overflow: hidden; border: 1px solid #304238; box-shadow: 0 14px 30px #1628200a; }
+    .terminal-head { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #ffffff15; padding: 10px 17px; color: #a5b9ab; font-size: 11px; }
+    .copy { background: transparent; border: 0; color: #e6eee8; cursor: pointer; font-size: 11px; padding: 5px 7px; border-radius: 3px; }
+    .copy:hover { background: #ffffff15; }
+    pre { margin: 0; padding: 23px 20px; overflow-x: auto; font-size: 11px; line-height: 2; }
+    code { font-family: 'SFMono-Regular', Consolas, monospace; }
+    .terminal .comment { color: #a1b9ab; }
+    .setup-link { display: inline-block; margin-top: 18px; color: var(--green); font-size: 12px; border-bottom: 1px solid #a4bbac; padding-bottom: 4px; }
+    .faq { padding-top: 0; }
+    .faq h2 { font-size: 27px; margin-bottom: 25px; }
+    details { border-top: 1px solid var(--line); padding: 20px 0; }
+    details:last-child { border-bottom: 1px solid var(--line); }
+    summary { cursor: pointer; font-size: 14px; font-weight: 550; }
+    details p { color: var(--muted); font-size: 13px; line-height: 1.8; max-width: 780px; margin-bottom: 0; }
+    footer { border-top: 1px solid var(--line); padding: 28px 0; }
+    .footer-inner { display: flex; justify-content: space-between; align-items: center; gap: 25px; font-size: 11px; color: var(--muted); }
+    .footer-links { display: flex; gap: 25px; }
+    @keyframes arrive { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+    .hero-content { animation: arrive .8s ease-out both; }
+    .scene { animation: arrive 1s .15s ease-out both; }
+    @media (min-width: 1600px) { .hero { min-height: 850px; height: 880px; } }
+    @media (max-width: 700px) {
+      .wrap { width: calc(100% - 40px); }
+      nav { min-height: 66px; gap: 15px; }
+      .nav-links { gap: 18px; font-size: 12px; }
+      .nav-links .about-link { display: none; }
+      .brand { font-size: 18px; }
+      .hero { min-height: 760px; height: auto; }
+      .hero-content { padding-top: 103px; }
+      h1 { font-size: 65px; }
+      .hero-copy { font-size: 18px; max-width: 320px; }
+      .scene { margin-top: 28px; height: 391px; }
+      .phone { width: 264px; height: 384px; transform: rotate(-2deg); }
+      .float-note { display: none; }
+      .float-note .note-sub { display: none; }
+      .float-note .note-title { margin: 0; font-size: 9px; }
+      .privacy-note { left: auto; right: 0; top: 279px; }
+      .hero-foot { gap: 17px; font-size: 9px; margin-top: 19px; padding-bottom: 26px; }
+      .section { padding: 58px 0; }
+      h2, .setup h2 { font-size: 30px; }
+      .features { grid-template-columns: 1fr; gap: 27px; margin-top: 32px; }
+      .feature { padding-top: 17px; }
+      .feature h3 { margin-top: 8px; }
+      .flow { grid-template-columns: 1fr; gap: 7px; margin-top: 30px; }
+      .connector { display: none; }
+      .setup { grid-template-columns: 1fr; gap: 30px; }
+      pre { font-size: 10px; padding: 18px 14px; }
+      .faq { padding-top: 0; }
+      .footer-inner { align-items: flex-start; flex-direction: column; gap: 17px; }
+    }
+    @media (max-width: 360px) { .float-note { display: none; } .nav-links { gap: 12px; } h1 { font-size: 58px; } }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+  <header>
+    <nav class="wrap" aria-label="Main navigation">
+      <a class="brand" href="#" aria-label="HeyLoop home"><span class="mark" aria-hidden="true"></span>heyloop</a>
+      <div class="nav-links"><a class="about-link" href="#about">The idea</a><a href="#start">Get started</a><a href="https://github.com/californiaAlmonds/heyloop">GitHub</a></div>
+    </nav>
+  </header>
+  <main>
+    <section class="hero" aria-labelledby="title">
+      <div class="hero-content wrap">
+        <div class="eyebrow">Your agents. A little closer.</div>
+        <h1 id="title">HeyLoop</h1>
+        <p class="hero-copy">Your agents keep working.<br><span>You keep living.</span></p>
+        <div class="actions"><a class="primary" href="#start">Get started</a><a class="source" href="https://github.com/californiaAlmonds/heyloop">Explore the source</a></div>
+        <div class="scene" role="img" aria-label="Concept preview: a coding agent asks to run npm test, and a user replies from their phone. This is not a released app screenshot.">
+          <div class="phone" aria-hidden="true">
+            <div class="phone-top"><span>9:41</span><span class="island"></span><span>100%</span></div>
+            <div class="chat-head"><div class="agent-avatar">H</div><div><div class="chat-title">Checkout refactor</div><div class="chat-status"><span class="dot"></span>Waiting for you</div></div></div>
+            <div class="timestamp">TODAY, 9:41 AM</div>
+            <div class="bubble">The refactor is ready. One last check before I wrap up.</div>
+            <div class="bubble"><div class="approval-label"><span>APPROVAL REQUEST</span><span>LOW RISK</span></div>Run the test suite?<code>npm test</code><div class="mock-answer">Approve</div></div>
+            <div class="reply">Looks good. Go ahead.</div>
+          </div>
+          <div class="float-note" aria-hidden="true"><div class="note-title"><span class="dot"></span>Still in the loop</div><div class="note-sub">Even when you're away.</div></div>
+          <div class="float-note privacy-note" aria-hidden="true"><div class="note-title">Just between your devices.</div><div class="note-sub">End-to-end encrypted.</div></div>
+        </div>
+        <p class="concept">Phone experience concept. Android app in development.</p>
+        <div class="hero-foot"><span>LOCAL-FIRST</span><span>SELF-HOSTED</span><span>NO ACCOUNTS</span></div>
+      </div>
+    </section>
+    <section id="about" class="section wrap">
+      <div class="section-label">01 / A quieter way to work</div>
+      <h2>Step away.<br>Not out of the conversation.</h2>
+      <p class="lead">Long-running coding agents shouldn't keep you at your desk. HeyLoop is building a private connection between the work on your computer and the phone in your pocket.</p>
+      <div class="features">
+        <article class="feature"><span class="number">01</span><h3>Know what's happening.</h3><p>Agents send status updates through MCP. Your local daemon keeps the conversation and history together.</p></article>
+        <article class="feature"><span class="number">02</span><h3>Have the final say.</h3><p>HeyLoop approval requests wait for your answer. The first answer wins; unanswered requests default to deny.</p></article>
+        <article class="feature"><span class="number">03</span><h3>Keep it yours.</h3><p>Your computer owns the history. Your self-hosted relay passes ciphertext. No account or hosted dashboard required.</p></article>
+      </div>
+    </section>
+    <section class="section architecture">
+      <div class="wrap"><div class="section-label">02 / Small by design</div><h2>A connection. Not another cloud.</h2><p class="lead">No exposed ports on your computer. No plaintext at the relay. Just your devices, connected.</p>
+        <div class="flow"><div class="flow-step"><strong>Your computer</strong><p>MCP agents, local daemon, SQLite history.</p></div><span class="connector" aria-hidden="true">&rarr;</span><div class="flow-step"><strong>Your relay</strong><p>Outbound connection. Encrypted delivery. Self-hosted on Cloudflare.</p></div><span class="connector" aria-hidden="true">&rarr;</span><div class="flow-step"><strong>Your phone</strong><p>QR pairing, updates, replies, and approvals. Android experience in development.</p></div></div>
+      </div>
+    </section>
+    <section id="start" class="section wrap setup">
+      <div><div class="section-label">03 / Start locally</div><h2>Meet your agent's<br>new plus-one.</h2><p class="lead">The daemon and local relay are ready to try. Start with the daemon, then connect your VS Code workspace.</p><p class="availability">Early development &middot; Node.js 22.13+ &middot; npm<br>Android scaffold available. No downloadable app yet.</p><a class="setup-link" href="https://github.com/californiaAlmonds/heyloop#quick-start">Full setup guide &rarr;</a></div>
+      <div><div class="terminal"><div class="terminal-head"><span>Terminal / quick start</span><button class="copy" type="button" aria-label="Copy quick-start commands">Copy</button></div><pre><code id="commands">git clone https://github.com/californiaAlmonds/heyloop.git
+cd heyloop
+npm install
+npm run cli -w @heyloop/daemon -- start</code></pre></div><p class="availability">In a second terminal, configure your coding workspace:</p><div class="terminal"><pre><code>npm run cli -w @heyloop/daemon -- setup vscode /path/to/project</code></pre></div><p id="copy-status" aria-live="polite" class="availability"></p></div>
+    </section>
+    <section class="section wrap faq" aria-labelledby="faq-title"><h2 id="faq-title">A few things to know.</h2>
+      <details><summary>What can I use today?</summary><p>The local MCP daemon, desktop approvals, CLI messaging, encrypted pairing protocol, and local relay have working smoke tests. The Expo Android app is scaffolded; phone screens, push notifications, and desktop-first routing are still on the roadmap.</p></details>
+      <details><summary>Can it answer VS Code's built-in Allow prompts?</summary><p>No. HeyLoop handles its own MCP approval requests, not VS Code's native tool confirmations. Use a narrow command allowlist for trusted operations. Never enable global auto-approve to work around this limitation.</p></details>
+      <details><summary>Do I need an account?</summary><p>No HeyLoop account. Pairing uses a QR code to exchange a secret between your devices. You control the relay deployment; deploying to Cloudflare requires your own Cloudflare account.</p></details>
+      <details><summary>Where does my data live?</summary><p>Conversation history lives in SQLite on your computer. The relay queues encrypted messages until they are acknowledged. Treat pairing QR codes and daemon tokens like passwords.</p></details>
+    </section>
+  </main>
+  <footer><div class="wrap footer-inner"><a class="brand" href="#">heyloop</a><span>Built for a little more freedom.</span><div class="footer-links"><a href="https://github.com/californiaAlmonds/heyloop">Source</a><a href="https://github.com/californiaAlmonds/heyloop/issues">Feedback</a></div></div></footer>
+  <script>
+    const copyButton = document.querySelector('.copy');
+    copyButton.addEventListener('click', async () => {
+      const status = document.querySelector('#copy-status');
+      try {
+        await navigator.clipboard.writeText(document.querySelector('#commands').textContent);
+        status.textContent = 'Commands copied.';
+      } catch {
+        const selection = getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(document.querySelector('#commands'));
+        selection.removeAllRanges();
+        selection.addRange(range);
+        status.textContent = 'Select and copy the highlighted commands.';
+      }
+    });
+  </script>
+</body>
+</html>

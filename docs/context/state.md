@@ -6,7 +6,7 @@ Updated: 2026-10-02
 Phase 1 (MVP): daemon **done** · relay **done (local)** · Android app **next**
 
 ## Working
-- npm-workspaces monorepo: `packages/protocol`, `apps/daemon`, `apps/relay`. Repo at `E:\heyloop`; 2 commits on `main`.
+- npm-workspaces monorepo: `packages/protocol`, `apps/daemon`, `apps/relay`, `apps/mobile`. Repo at `E:\heyloop`, branch `main`.
 - Daemon on `127.0.0.1:4519/mcp` (bearer token + Host allowlist); config/token/db in `~/.heyloop` (`HEYLOOP_HOME` overrides).
 - MCP tools: `send_status_update` (returns inbox), `ask_human_approval` (blocks ≤55s, then `pending`), `await_human_response`. Desktop answers via MCP elicitation.
 - Approval broker: first answer wins (409 late), expiry sweeper → `on_timeout`, chat status tracks `waiting_input`.
@@ -20,7 +20,10 @@ Phase 1 (MVP): daemon **done** · relay **done (local)** · Android app **next**
 - Firebase `heyloop-e3808` (Spark plan, FCM HTTP v1). Android package `com.californiaalmonds.heyloop`.
 - Firebase Android config + messaging-only service-account key in ignored `.credentials/firebase/`. Expo key upload pending manual file selection. Personal setup notes in ignored `docs/context/cloud-setup.md`.
 - `apps/mobile`: Expo SDK 57 blank TypeScript scaffold; `app.config.ts` reads `GOOGLE_SERVICES_JSON` (EAS file env) or the local `.credentials` path.
-- GitHub repo `californiaAlmonds/heyloop` (public) created, nothing pushed yet (author-email decision pending).
+- GitHub repo `californiaAlmonds/heyloop` is public; four existing commits pushed unchanged, `origin/main` configured.
+- README documents setup, CLI, security, limitations, and roadmap. `docs/site/index.html` is the responsive glass-style product website (phone preview labeled concept).
+- GitHub Pages enabled with Actions source at `https://californiaalmonds.github.io/heyloop/`; workflow publishes only `docs/site` on relevant `main` pushes.
+- Verification: workspace typecheck passes; website anchors, image loading, copy/FAQ controls, and overflow/phone spacing checks pass at 320/390/768/1440px.
 
 ## Next
 1. Android app (Expo dev build): QR pairing, chat list with status dots, conversation view, approval sheet, reply, rename; local cache with per-chat `seq` cursors.
@@ -30,7 +33,6 @@ Phase 1 (MVP): daemon **done** · relay **done (local)** · Android app **next**
 
 ## Open items
 - `LICENSE` file — needs copyright holder name (package.json says MIT).
-- README not written yet.
 - User to verify HeyLoop domain / Play Store / trademark availability.
 
 ## Known limitations

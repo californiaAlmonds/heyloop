@@ -29,3 +29,4 @@ Append-only. One line per decision: date — decision — why.
 - 2026-10-02 — Expo hosted project is `@heyloop-californiaalmonds/heyloop`, linked to GitHub `californiaAlmonds`; keep Firebase credentials in ignored local storage — prepare Android builds without committing private keys.
 - 2026-10-02 — Firebase project `heyloop-e3808`, Android package `com.californiaalmonds.heyloop`; Spark plan, no Analytics/Gemini — FCM needs neither billing nor analytics.
 - 2026-10-02 — Dedicated `heyloop-fcm-sender` service account with Firebase Cloud Messaging API Admin only — push sender does not need broad Firebase Admin permissions; direct FCM relay design unchanged.
+- 2026-10-02 — Public website is dependency-free static HTML in `docs/site`, deployed with GitHub Pages Actions; phone illustration explicitly labeled a concept — no build toolchain or false claims of mobile readiness.
