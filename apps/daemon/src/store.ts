@@ -77,6 +77,11 @@ CREATE TABLE IF NOT EXISTS inbound_frames (
   id TEXT PRIMARY KEY,
   ts TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS frame_results (
+  id TEXT PRIMARY KEY,
+  ok INTEGER NOT NULL,
+  error TEXT
+);
 `;
 
 const now = () => new Date().toISOString();
@@ -217,6 +222,15 @@ export class Store extends EventEmitter<{ envelope: [Envelope]; chat: [Chat] }> 
   /** Records an inbound frame id; returns false if it was already processed. */
   markProcessed(frameId: string): boolean {
     return this.db.prepare('INSERT OR IGNORE INTO inbound_frames VALUES (?, ?)').run(frameId, now()).changes === 1;
+  }
+
+  saveResult(frameId: string, ok: boolean, error?: string): void {
+    this.db.prepare('INSERT OR IGNORE INTO frame_results VALUES (?, ?, ?)').run(frameId, ok ? 1 : 0, error ?? null);
+  }
+
+  getResult(frameId: string): { ok: boolean; error?: string } | undefined {
+    const row = this.db.prepare('SELECT ok, error FROM frame_results WHERE id = ?').get(frameId) as Row | undefined;
+    return row ? { ok: row.ok === 1, error: opt<string>(row.error) } : undefined;
   }
 
   createApproval(rec: Omit<ApprovalRecord, 'status'>): ApprovalRecord {

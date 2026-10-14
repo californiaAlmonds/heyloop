@@ -55,8 +55,8 @@ class Phone {
   }
 }
 
-const hasEnvelope = (kind: string) => (f: DaemonFrame) =>
-  f.type === 'envelopes' && f.envelopes.some((e) => e.body.kind === kind);
+const hasEnvelope = (kind: string, chatId?: string) => (f: DaemonFrame) =>
+  f.type === 'envelopes' && f.envelopes.some((e) => e.body.kind === kind && (!chatId || e.chat_id === chatId));
 
 const check = (label: string, ok: boolean) => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`);
@@ -93,8 +93,8 @@ const asking = call('ask_human_approval', {
   input: 'confirm',
   wait_seconds: 10,
 });
-const req = await phone.waitFor(hasEnvelope('approval_request'));
-const requestId = req.type === 'envelopes' ? (req.envelopes.find((e) => e.body.kind === 'approval_request')!.body as { request_id: string }).request_id : '';
+const req = await phone.waitFor(hasEnvelope('approval_request', status.chat_id));
+const requestId = req.type === 'envelopes' ? (req.envelopes.find((e) => e.body.kind === 'approval_request' && e.chat_id === status.chat_id)!.body as { request_id: string }).request_id : '';
 phone.send({ type: 'answer', id: ulid(), request_id: requestId, option_id: 'approve' });
 const answered = await asking;
 check('phone answer unblocks the agent', answered.status === 'answered' && answered.answered_via === 'phone');
@@ -103,6 +103,13 @@ const dupId = ulid();
 phone.send({ type: 'say', id: dupId, chat_id: status.chat_id, text: 'also update the changelog' });
 phone.send({ type: 'say', id: dupId, chat_id: status.chat_id, text: 'also update the changelog' });
 await phone.waitFor((f) => f.type === 'result' && f.ref === dupId);
+for (let i = 0; i < 50 && phone.frames.filter((f) => f.type === 'result' && f.ref === dupId).length < 2; i++) {
+  await new Promise((r) => setTimeout(r, 100));
+}
+check(
+  'duplicate frame gets the original result again',
+  phone.frames.filter((f) => f.type === 'result' && f.ref === dupId && f.ok).length === 2,
+);
 const withInbox = await call('send_status_update', { chat_id: status.chat_id, summary: 'Migrated', level: 'success' });
 check('phone message reaches inbox exactly once', withInbox.inbox.length === 1);
 

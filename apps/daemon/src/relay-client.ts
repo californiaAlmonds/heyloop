@@ -80,13 +80,19 @@ export class RelayClient {
       this.phoneOnline = frame.online;
     } else if (frame.t === 'msg') {
       const decoded = PhoneFrame.safeParse(open(this.keys.key, frame.data));
-      if (decoded.success && this.store.markProcessed(decoded.data.id)) this.handle(decoded.data);
+      if (decoded.success) {
+        if (this.store.markProcessed(decoded.data.id)) this.handle(decoded.data);
+        else this.replyResult(decoded.data.id); // Phone re-sent an unconfirmed frame.
+      }
       this.ws?.send(JSON.stringify({ t: 'ack', id: frame.id }));
     }
   }
 
   private handle(frame: PhoneFrame): void {
-    const reply = (ok: boolean, error?: string) => this.sendFrame({ type: 'result', ref: frame.id, ok, error });
+    const reply = (ok: boolean, error?: string) => {
+      this.store.saveResult(frame.id, ok, error);
+      this.sendFrame({ type: 'result', ref: frame.id, ok, error });
+    };
 
     switch (frame.type) {
       case 'sync': {
@@ -117,6 +123,11 @@ export class RelayClient {
         // Consumed by desktop-first routing (not built yet).
         return reply(true);
     }
+  }
+
+  private replyResult(ref: string): void {
+    const prior = this.store.getResult(ref);
+    this.sendFrame({ type: 'result', ref, ok: prior?.ok ?? true, error: prior?.error });
   }
 
   private sendFrame(frame: DaemonFrame): void {
