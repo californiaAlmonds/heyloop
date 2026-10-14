@@ -16,6 +16,8 @@ export const RelayClientFrame = z.discriminatedUnion('t', [
   z.object({ t: z.literal('ack'), id: z.string().min(1).max(40) }),
   // Phone only: native FCM registration token for doorbell pushes.
   z.object({ t: z.literal('push'), token: z.string().min(1).max(4096) }),
+  // Phone only: stop doorbells (sent on unpair).
+  z.object({ t: z.literal('push_off') }),
 ]);
 export type RelayClientFrame = z.infer<typeof RelayClientFrame>;
 

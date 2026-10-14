@@ -21,6 +21,8 @@ const MAX_QUEUE = 2000;
 const STALE_MS = 75_000;
 const SWEEP_MS = 30_000;
 const PUSH_MIN_MS = 15_000;
+// Rooms are open to anyone, so cap what one room can spend of the shared FCM credentials.
+const PUSH_DAILY_MAX = 100;
 
 const other = (role: RelayRole): RelayRole => (role === 'daemon' ? 'phone' : 'daemon');
 const queueKey = (role: RelayRole, id: string) => `q:${role}:${id}`;
@@ -91,6 +93,9 @@ export class Room extends DurableObject<Env> {
     if (frame.t === 'push') {
       if (att.role !== 'phone') return ws.close(1008, 'Phone only');
       await this.ctx.storage.put('push:token', frame.token);
+    } else if (frame.t === 'push_off') {
+      if (att.role !== 'phone') return ws.close(1008, 'Phone only');
+      await this.ctx.storage.delete('push:token');
     } else if (frame.t === 'send') {
       await this.enqueue(other(att.role), frame.data);
       if (att.role === 'daemon' && frame.push && !this.isOnline('phone')) this.ctx.waitUntil(this.notify(frame.push));
@@ -107,8 +112,15 @@ export class Room extends DurableObject<Env> {
     const key = `push:last:${hint}`;
     const now = Date.now();
     if (now - ((await storage.get<number>(key)) ?? 0) < PUSH_MIN_MS) return;
-    await storage.put(key, now);
-    if ((await sendDoorbell(account, token, hint)) === 'unregistered') await storage.delete('push:token');
+    const day = new Date(now).toISOString().slice(0, 10);
+    const budget = (await storage.get<{ day: string; n: number }>('push:budget')) ?? { day, n: 0 };
+    const used = budget.day === day ? budget.n : 0;
+    if (used >= PUSH_DAILY_MAX) return;
+    await storage.put({ [key]: now, 'push:budget': { day, n: used + 1 } });
+    // Only forget the token we tried; the phone may have registered a fresh one while FCM was answering.
+    if ((await sendDoorbell(account, token, hint)) === 'unregistered' && (await storage.get<string>('push:token')) === token) {
+      await storage.delete('push:token');
+    }
   }
 
   override async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {

@@ -73,10 +73,10 @@ class HeyLoopClient {
       if (raw) await this.activate(JSON.parse(raw) as PairingLink);
       this.update({ loaded: true });
       AppState.addEventListener('change', (state) => {
-        if (state === 'background' && this.ws) {
-          // A backgrounded socket can look alive for minutes; closing it lets the relay ring the phone instead.
+        if (state === 'background') {
+          // A backgrounded socket can look alive for minutes; staying disconnected lets the relay ring the phone instead.
           this.disconnect();
-          this.update({ status: 'offline', computerOnline: false });
+          if (this.keys && this.snapshot.status !== 'unauthorized') this.update({ status: 'offline', computerOnline: false });
         } else if (state === 'active' && this.keys && this.snapshot.status === 'offline') this.reconnectNow();
       });
       watchPushToken((token) => this.registerPush(token));
@@ -91,6 +91,11 @@ class HeyLoopClient {
   }
 
   async unpair(): Promise<void> {
+    if (this.ws && this.snapshot.status === 'online') {
+      // Best effort: stop the old room from ringing this phone.
+      this.ws.send(JSON.stringify({ t: 'push_off' }));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
     await SecureStore.deleteItemAsync(PAIRING_KEY);
     this.reset();
     this.cache.clear();
@@ -183,6 +188,7 @@ class HeyLoopClient {
 
   private connect(): void {
     const keys = this.keys;
+    if (AppState.currentState === 'background') return;
     if (!keys || !this.relay) return;
     const ws = new WebSocket(`${this.relay.replace(/^http/, 'ws')}/rooms/${keys.room}/ws?role=phone`);
     this.ws = ws;
