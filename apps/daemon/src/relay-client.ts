@@ -1,5 +1,6 @@
 import { deriveKeys, open, seal, type PairingKeys } from '@heyloop/protocol/crypto';
-import { PhoneFrame, RelayServerFrame, type DaemonFrame } from '@heyloop/protocol/relay';
+import { PhoneFrame, RelayServerFrame, type DaemonFrame, type PushHint } from '@heyloop/protocol/relay';
+import type { Envelope } from '@heyloop/protocol';
 import type { ApprovalBroker } from './broker.js';
 import type { Config } from './config.js';
 import type { Store } from './store.js';
@@ -25,7 +26,7 @@ export class RelayClient {
     private broker: ApprovalBroker,
   ) {
     this.keys = deriveKeys(relay.secret);
-    store.on('envelope', (envelope) => this.sendFrame({ type: 'envelopes', envelopes: [envelope] }));
+    store.on('envelope', (envelope) => this.sendFrame({ type: 'envelopes', envelopes: [envelope] }, pushHint(envelope)));
     store.on('chat', (chat) => this.sendFrame({ type: 'chats', machine: this.machine, chats: [chat] }));
   }
 
@@ -130,8 +131,14 @@ export class RelayClient {
     this.sendFrame({ type: 'result', ref, ok: prior?.ok ?? true, error: prior?.error });
   }
 
-  private sendFrame(frame: DaemonFrame): void {
+  private sendFrame(frame: DaemonFrame, push?: PushHint): void {
     if (!this.ready || this.ws?.readyState !== WebSocket.OPEN) return;
-    this.ws.send(JSON.stringify({ t: 'send', data: seal(this.keys.key, frame) }));
+    this.ws.send(JSON.stringify({ t: 'send', data: seal(this.keys.key, frame), push }));
   }
+}
+
+function pushHint({ sender, body }: Envelope): PushHint | undefined {
+  if (sender !== 'agent') return undefined;
+  if (body.kind === 'approval_request') return 'approval';
+  return body.kind === 'status' && body.notify ? 'update' : undefined;
 }

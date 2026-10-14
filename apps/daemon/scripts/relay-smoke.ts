@@ -38,6 +38,10 @@ class Phone {
     this.ws.send(JSON.stringify({ t: 'send', data: seal(keys.key, frame) }));
   }
 
+  registerPush(token: string): void {
+    this.ws.send(JSON.stringify({ t: 'push', token }));
+  }
+
   waitFor(match: (f: DaemonFrame) => boolean, ms = 5000): Promise<DaemonFrame> {
     const found = this.frames.find(match);
     if (found) return Promise.resolve(found);
@@ -75,10 +79,21 @@ const call = async (name: string, args: Record<string, unknown>) =>
 const intruder = new Phone();
 check('wrong token is rejected', (await intruder.connect('x'.repeat(43))) === 4401);
 
+const rogue = new WebSocket(`${wsBase}/rooms/${keys.room}/ws?role=daemon`);
+const rogueClose = await new Promise<number>((resolve) => {
+  rogue.addEventListener('open', () => rogue.send(JSON.stringify({ t: 'auth', token: keys.authToken })));
+  rogue.addEventListener('message', (ev) => {
+    if (JSON.parse(String(ev.data)).t === 'ready') rogue.send(JSON.stringify({ t: 'push', token: 'x' }));
+  });
+  rogue.addEventListener('close', (ev) => resolve(ev.code));
+});
+check('daemon cannot register a push token', rogueClose === 1008);
+
 const status = await call('send_status_update', { title: 'Relay smoke', summary: 'Relay test started', level: 'info' });
 
 const phone = new Phone();
 check('phone authenticates', (await phone.connect()) === 'ready');
+phone.registerPush('smoke-test-token');
 phone.send({ type: 'sync', id: ulid(), cursors: {} });
 const chats = await phone.waitFor((f) => f.type === 'chats' && f.chats.some((c) => c.chat_id === status.chat_id));
 check('sync returns chat list', chats.type === 'chats');

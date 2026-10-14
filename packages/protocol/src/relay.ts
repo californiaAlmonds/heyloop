@@ -6,10 +6,16 @@ import { Chat, Envelope, PresenceState } from './index.js';
 export const RelayRole = z.enum(['daemon', 'phone']);
 export type RelayRole = z.infer<typeof RelayRole>;
 
+/** What a push doorbell says; the relay never sees message content, so the daemon picks the hint. */
+export const PushHint = z.enum(['approval', 'update']);
+export type PushHint = z.infer<typeof PushHint>;
+
 export const RelayClientFrame = z.discriminatedUnion('t', [
   z.object({ t: z.literal('auth'), token: z.string().min(40).max(100) }),
-  z.object({ t: z.literal('send'), data: z.string().min(1) }),
+  z.object({ t: z.literal('send'), data: z.string().min(1), push: PushHint.optional() }),
   z.object({ t: z.literal('ack'), id: z.string().min(1).max(40) }),
+  // Phone only: native FCM registration token for doorbell pushes.
+  z.object({ t: z.literal('push'), token: z.string().min(1).max(4096) }),
 ]);
 export type RelayClientFrame = z.infer<typeof RelayClientFrame>;
 

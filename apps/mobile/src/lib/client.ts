@@ -6,6 +6,7 @@ import * as SecureStore from 'expo-secure-store';
 import { useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
 import { Cache } from './cache';
+import { getPushToken, watchPushToken } from './push';
 
 const PAIRING_KEY = 'heyloop.pairing';
 const PING_MS = 30_000;
@@ -72,8 +73,13 @@ class HeyLoopClient {
       if (raw) await this.activate(JSON.parse(raw) as PairingLink);
       this.update({ loaded: true });
       AppState.addEventListener('change', (state) => {
-        if (state === 'active' && this.keys && this.snapshot.status === 'offline') this.reconnectNow();
+        if (state === 'background' && this.ws) {
+          // A backgrounded socket can look alive for minutes; closing it lets the relay ring the phone instead.
+          this.disconnect();
+          this.update({ status: 'offline', computerOnline: false });
+        } else if (state === 'active' && this.keys && this.snapshot.status === 'offline') this.reconnectNow();
       });
+      watchPushToken((token) => this.registerPush(token));
     })();
     return this.initialized;
   }
@@ -163,6 +169,10 @@ class HeyLoopClient {
     this.emit();
   }
 
+  private registerPush(token: string): void {
+    if (this.ws && this.snapshot.status === 'online') this.ws.send(JSON.stringify({ t: 'push', token }));
+  }
+
   private disconnect(): void {
     const ws = this.ws;
     this.ws = undefined;
@@ -213,6 +223,7 @@ class HeyLoopClient {
       this.ping = setInterval(() => this.ws?.send('ping'), PING_MS);
       this.update({ status: 'online' });
       for (const [id, pending] of this.pending) this.transmit(id, pending);
+      void getPushToken().then((token) => token && this.registerPush(token));
     } else if (frame.t === 'peer') {
       this.update({ computerOnline: frame.online });
       // The relay sends peer status right after ready, so this also covers the initial sync.

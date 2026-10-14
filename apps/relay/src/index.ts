@@ -1,8 +1,11 @@
 import { DurableObject } from 'cloudflare:workers';
-import { RelayClientFrame, type RelayRole, type RelayServerFrame } from '@heyloop/protocol/relay';
+import { RelayClientFrame, type PushHint, type RelayRole, type RelayServerFrame } from '@heyloop/protocol/relay';
+import { sendDoorbell } from './fcm.js';
 
 interface Env {
   ROOM: DurableObjectNamespace<Room>;
+  /** Firebase service-account JSON (Wrangler secret). Unset disables push. */
+  FCM_SERVICE_ACCOUNT?: string;
 }
 
 interface Attachment {
@@ -17,6 +20,7 @@ const MAX_QUEUE = 2000;
 // Clients ping every 30s; sleeping laptops and dozing phones vanish without a close frame.
 const STALE_MS = 75_000;
 const SWEEP_MS = 30_000;
+const PUSH_MIN_MS = 15_000;
 
 const other = (role: RelayRole): RelayRole => (role === 'daemon' ? 'phone' : 'daemon');
 const queueKey = (role: RelayRole, id: string) => `q:${role}:${id}`;
@@ -84,8 +88,27 @@ export class Room extends DurableObject<Env> {
       return;
     }
 
-    if (frame.t === 'send') await this.enqueue(other(att.role), frame.data);
-    else if (frame.t === 'ack') await this.ack(att.role, frame.id);
+    if (frame.t === 'push') {
+      if (att.role !== 'phone') return ws.close(1008, 'Phone only');
+      await this.ctx.storage.put('push:token', frame.token);
+    } else if (frame.t === 'send') {
+      await this.enqueue(other(att.role), frame.data);
+      if (att.role === 'daemon' && frame.push && !this.isOnline('phone')) this.ctx.waitUntil(this.notify(frame.push));
+    } else if (frame.t === 'ack') await this.ack(att.role, frame.id);
+  }
+
+  /** Content-free doorbell; storage (not memory) holds the rate limit because the object can be evicted. */
+  private async notify(hint: PushHint): Promise<void> {
+    const account = this.env.FCM_SERVICE_ACCOUNT;
+    if (!account) return;
+    const storage = this.ctx.storage;
+    const token = await storage.get<string>('push:token');
+    if (!token) return;
+    const key = `push:last:${hint}`;
+    const now = Date.now();
+    if (now - ((await storage.get<number>(key)) ?? 0) < PUSH_MIN_MS) return;
+    await storage.put(key, now);
+    if ((await sendDoorbell(account, token, hint)) === 'unregistered') await storage.delete('push:token');
   }
 
   override async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
