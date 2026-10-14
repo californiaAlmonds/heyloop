@@ -8,11 +8,15 @@ interface Env {
 interface Attachment {
   role: RelayRole;
   authed: boolean;
+  since: number;
 }
 
 const ROOM_PATH = /^\/rooms\/([A-Za-z0-9_-]{22})\/ws$/;
 const MAX_FRAME_CHARS = 512 * 1024;
 const MAX_QUEUE = 2000;
+// Clients ping every 30s; sleeping laptops and dozing phones vanish without a close frame.
+const STALE_MS = 75_000;
+const SWEEP_MS = 30_000;
 
 const other = (role: RelayRole): RelayRole => (role === 'daemon' ? 'phone' : 'daemon');
 const queueKey = (role: RelayRole, id: string) => `q:${role}:${id}`;
@@ -55,7 +59,8 @@ export class Room extends DurableObject<Env> {
     const role = new URL(req.url).searchParams.get('role') as RelayRole;
     const { 0: client, 1: server } = new WebSocketPair();
     this.ctx.acceptWebSocket(server, [role]);
-    server.serializeAttachment({ role, authed: false } satisfies Attachment);
+    server.serializeAttachment({ role, authed: false, since: Date.now() } satisfies Attachment);
+    if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now() + SWEEP_MS);
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -84,13 +89,44 @@ export class Room extends DurableObject<Env> {
   }
 
   override async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
-    const att = ws.deserializeAttachment() as Attachment;
-    if (att.authed && !this.isOnline(att.role, ws)) this.broadcast(other(att.role), { t: 'peer', online: false });
+    this.disconnected(ws);
     try {
       ws.close(code, reason);
     } catch {
       // Already closed.
     }
+  }
+
+  override async webSocketError(ws: WebSocket): Promise<void> {
+    this.disconnected(ws);
+  }
+
+  override async alarm(): Promise<void> {
+    const now = Date.now();
+    const dropped = new Set<RelayRole>();
+    for (const ws of this.ctx.getWebSockets()) {
+      if (this.isFresh(ws, now)) continue;
+      const att = ws.deserializeAttachment() as Attachment;
+      if (att.authed) dropped.add(att.role);
+      try {
+        ws.close(1001, 'Idle');
+      } catch {
+        // Already closed.
+      }
+    }
+    for (const role of dropped) if (!this.isOnline(role)) this.broadcast(other(role), { t: 'peer', online: false });
+    if (this.ctx.getWebSockets().length > 0) await this.ctx.storage.setAlarm(now + SWEEP_MS);
+  }
+
+  private disconnected(ws: WebSocket): void {
+    const att = ws.deserializeAttachment() as Attachment;
+    if (att.authed && !this.isOnline(att.role, ws)) this.broadcast(other(att.role), { t: 'peer', online: false });
+  }
+
+  private isFresh(ws: WebSocket, now = Date.now()): boolean {
+    const att = ws.deserializeAttachment() as Attachment;
+    const pinged = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? 0;
+    return now - Math.max(att.since, pinged) < STALE_MS;
   }
 
   /** First daemon to connect claims the room (trust on first use); everyone else must match. */
@@ -106,7 +142,7 @@ export class Room extends DurableObject<Env> {
   private sockets(role: RelayRole, except?: WebSocket): WebSocket[] {
     return this.ctx
       .getWebSockets(role)
-      .filter((s) => s !== except && (s.deserializeAttachment() as Attachment).authed);
+      .filter((s) => s !== except && (s.deserializeAttachment() as Attachment).authed && this.isFresh(s));
   }
 
   private isOnline(role: RelayRole, except?: WebSocket): boolean {
