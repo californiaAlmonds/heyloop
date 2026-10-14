@@ -20,10 +20,14 @@ Phase 1 (MVP): daemon **done** · relay **done (local)** · Android app **in pro
 - Firebase `heyloop-e3808` (Spark plan, FCM HTTP v1). Android package `com.californiaalmonds.heyloop`.
 - Firebase Android config + messaging-only service-account key in ignored `.credentials/firebase/`. Expo key upload pending manual file selection. Personal setup notes in ignored `docs/context/cloud-setup.md`.
 - `apps/mobile`: Expo SDK 57 + Expo Router (`src/app`). Screens: `pair` (QR scan via `expo-camera`, or `heyloop://pair` deep link, always with a confirm step), `index` (chat list, status dots, pending-approval preview, connection banner, unpair), `chat/[id]` (read-only bubbles; approval `command` verbatim).
-- Mobile relay client `src/lib/client.ts`: pairing in `expo-secure-store`, WSS + auth frame, backoff, ping, `sync` on daemon `peer online`, contiguous per-chat cursors, acks every msg; 4401 → "unauthorized" + manual retry. State is in-memory only (full re-sync per launch).
+- Mobile relay client `src/lib/client.ts`: pairing in `expo-secure-store`, WSS + auth frame, backoff, ping, `sync` on daemon `peer online`, contiguous per-chat cursors, acks every msg; 4401 → "unauthorized" + manual retry. History is cached in `expo-sqlite` (`src/lib/cache.ts`, device-verified relaunch restore): rows sealed with a separate `cacheKey` derived from the pairing secret, restored before connecting (newest 300 envelopes/chat + saved cursors), wiped on unpair or when the pairing room changes.
+- Mobile actions (device-verified 2026-10-13, incl. answering while the daemon was stopped: delivered once on restart): inline approval buttons (confirm/choice/text; high-risk non-danger options ask an Alert first; hidden after `expires_at`), composer (`say`, allowed while only the computer is offline), header Rename modal. `client.submit()` waits for the daemon `result` (15s); on `unconfirmed` the frame stays queued, is resent with the same id on reconnect, and UI retries reuse that id (`lib/use-action.ts`). Approval answers show the option label and a WhatsApp-style quote of the question; tapping it scrolls to and flashes the original (overlay border, no layout shift).
+- Daemon stores each phone frame's result (`frame_results`) and re-replies it when a frame id repeats.
 - `src/polyfills.ts` seeds tweetnacl's PRNG from `expo-crypto`; Expo runtime already provides `TextDecoder`/`URL`. `metro.config.js` maps NodeNext `./x.js` imports to `.ts` for the shared protocol package.
-- Root `package.json` `overrides` pin `react`/`react-dom` to `19.2.3` (Expo SDK 57) so `react@*` peers don't install a second copy.
-- Verified: workspace typecheck, `expo-doctor` 21/21, `expo export --platform android` bundles. Not yet run on a device.
+- Root `package.json` devDependencies pin `react`/`react-dom` to `19.2.3` (Expo SDK 57) so peers hoist one copy (npm `overrides` didn't survive `expo install`). After any `expo install`, check `node_modules/react` is 19.2.3.
+- Verified on a real Android phone (Expo Go 57, USB + `adb reverse` for 8787/8081): QR pairing, sync, chat list, conversation, live updates from desktop.
+- Relay liveness: sockets silent >75s are closed by a 30s alarm sweep and the peer is told `online:false` (verified with a silent fake daemon: offline at ~90s).
+- Verified: workspace typecheck, `expo-doctor` 21/21, `expo export --platform android`, `smoke:relay` 7/7.
 - GitHub repo `californiaAlmonds/heyloop` is public; four existing commits pushed unchanged, `origin/main` configured.
 - Branch policy: `develop-californiaAlmonds` updates restricted to personal-repo owner (admin bypass); `main` requires PRs, up-to-date Typecheck + Daemon smoke checks, resolved conversations; admins enforced, no force pushes/deletion. No mandatory second-person review.
 - `.github/workflows/checks.yml` runs on every main PR and main/develop pushes. Smoke test asserts tool names, inbox delivery, pending/answered approvals, and 409 late answers; isolated local run + typecheck pass.
@@ -32,11 +36,9 @@ Phase 1 (MVP): daemon **done** · relay **done (local)** · Android app **in pro
 - Verification: workspace typecheck passes; website anchors, image loading, copy/FAQ controls, and overflow/phone spacing checks pass at 320/390/768/1440px.
 
 ## Next
-1. Run the app on a device (Expo Go works for now: camera/secure-store/crypto are bundled) against the local relay via `adb reverse tcp:8787 tcp:8787`; fix runtime issues.
-2. Mobile actions: approval sheet (answer), reply (`say`), rename; show `result` errors.
-3. Persist cache + cursors (expo-sqlite) so launches don't re-sync everything.
-4. Push: FCM doorbell from relay when phone offline (needs FCM credentials); then presence + 30s desktop-first gate; stall nudge.
-5. `eas.json` + development build; deploy relay to Cloudflare; real-world VS Code test.
+1. Push: FCM doorbell from relay when phone offline (needs FCM credentials); then presence + 30s desktop-first gate; stall nudge.
+2. `eas.json` + development build; deploy relay to Cloudflare; real-world VS Code test.
+3. Cache limits: no pruning and only the newest 300 envelopes per chat are loaded (no lazy older history yet).
 
 ## Open items
 - `LICENSE` file — needs copyright holder name (package.json says MIT).

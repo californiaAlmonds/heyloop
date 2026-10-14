@@ -30,6 +30,8 @@ export interface PairingKeys {
   authToken: string;
   /** XSalsa20-Poly1305 key; never leaves paired devices. */
   key: Uint8Array;
+  /** Separate key for rows cached on the phone, so a cached row can never be replayed as a relay frame. */
+  cacheKey: Uint8Array;
 }
 
 export function newPairingSecret(): string {
@@ -43,6 +45,7 @@ export function deriveKeys(secret: string): PairingKeys {
     room: toBase64Url(derive(s, 'room', 16)),
     authToken: toBase64Url(derive(s, 'auth', 32)),
     key: derive(s, 'enc', nacl.secretbox.keyLength),
+    cacheKey: derive(s, 'cache', nacl.secretbox.keyLength),
   };
 }
 

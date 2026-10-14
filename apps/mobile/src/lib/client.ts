@@ -5,12 +5,21 @@ import { randomUUID } from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import { useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
+import { Cache } from './cache';
 
 const PAIRING_KEY = 'heyloop.pairing';
 const PING_MS = 30_000;
 const MAX_BACKOFF_MS = 30_000;
+const RESULT_TIMEOUT_MS = 15_000;
 
 export type ConnectionStatus = 'offline' | 'connecting' | 'online' | 'unauthorized';
+
+/** `error` is a daemon code, or 'offline' (never sent) / 'unconfirmed' (sent, no result yet; resent on reconnect). */
+export interface SubmitResult {
+  id: string;
+  ok: boolean;
+  error?: string;
+}
 
 export interface Snapshot {
   loaded: boolean;
@@ -23,7 +32,7 @@ export interface Snapshot {
 }
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
-type OutgoingFrame = DistributiveOmit<PhoneFrame, 'id'>;
+export type OutgoingFrame = DistributiveOmit<PhoneFrame, 'id'>;
 
 const EMPTY: Snapshot = {
   loaded: false,
@@ -44,6 +53,10 @@ class HeyLoopClient {
   private retry?: ReturnType<typeof setTimeout>;
   private backoff = 1000;
   private cursors: Record<string, number> = {};
+  private pending = new Map<string, OutgoingFrame>();
+  private waiters = new Map<string, (r: Omit<SubmitResult, 'id'>) => void>();
+  private cache = new Cache();
+  private generation = 0;
   private initialized?: Promise<void>;
 
   subscribe = (listener: () => void) => {
@@ -56,8 +69,8 @@ class HeyLoopClient {
   init(): Promise<void> {
     this.initialized ??= (async () => {
       const raw = await SecureStore.getItemAsync(PAIRING_KEY);
+      if (raw) await this.activate(JSON.parse(raw) as PairingLink);
       this.update({ loaded: true });
-      if (raw) this.activate(JSON.parse(raw) as PairingLink);
       AppState.addEventListener('change', (state) => {
         if (state === 'active' && this.keys && this.snapshot.status === 'offline') this.reconnectNow();
       });
@@ -68,12 +81,13 @@ class HeyLoopClient {
   async pair(link: PairingLink): Promise<void> {
     await SecureStore.setItemAsync(PAIRING_KEY, JSON.stringify(link));
     this.reset();
-    this.activate(link);
+    await this.activate(link);
   }
 
   async unpair(): Promise<void> {
     await SecureStore.deleteItemAsync(PAIRING_KEY);
     this.reset();
+    this.cache.clear();
   }
 
   reconnectNow(): void {
@@ -85,20 +99,63 @@ class HeyLoopClient {
 
   send(frame: OutgoingFrame): boolean {
     if (!this.keys || !this.ws || this.snapshot.status !== 'online') return false;
-    const data = seal(this.keys.key, { ...frame, id: randomUUID() });
-    this.ws.send(JSON.stringify({ t: 'send', data }));
+    this.transmit(randomUUID(), frame);
     return true;
   }
 
-  private activate(link: PairingLink): void {
-    this.relay = link.relay;
-    this.keys = deriveKeys(link.secret);
+  /**
+   * Sends a user action and waits for the daemon's result. After 'unconfirmed' the frame stays queued and is
+   * resent with the same id on reconnect; pass that id again to retry so the daemon dedupes it.
+   */
+  submit(frame: OutgoingFrame, id: string = randomUUID()): Promise<SubmitResult> {
+    if (!this.keys || !this.ws || this.snapshot.status !== 'online') {
+      return Promise.resolve({ id, ok: false, error: 'offline' });
+    }
+    this.waiters.get(id)?.({ ok: false, error: 'unconfirmed' });
+    this.pending.set(id, frame);
+    this.transmit(id, frame);
+    return new Promise((resolve) => {
+      const settle = (r: Omit<SubmitResult, 'id'>) => {
+        clearTimeout(timer);
+        if (this.waiters.get(id) === settle) this.waiters.delete(id);
+        resolve({ id, ...r });
+      };
+      const timer = setTimeout(() => settle({ ok: false, error: 'unconfirmed' }), RESULT_TIMEOUT_MS);
+      this.waiters.set(id, settle);
+    });
+  }
+
+  /** Stops resending an unconfirmed action the user gave up on. */
+  discard(id: string): void {
+    this.pending.delete(id);
+  }
+
+  private transmit(id: string, frame: OutgoingFrame): void {
+    if (!this.keys || !this.ws) return;
+    this.ws.send(JSON.stringify({ t: 'send', data: seal(this.keys.key, { ...frame, id }) }));
+  }
+
+  private async activate(link: PairingLink): Promise<void> {
+    const generation = ++this.generation;
+    const keys = deriveKeys(link.secret);
     this.update({ pairing: { relay: link.relay, name: link.name } });
+    // Restore before connecting so the first sync sends the saved cursors.
+    const cached = await this.cache.attach(keys.room, keys.cacheKey);
+    if (generation !== this.generation) return;
+    this.relay = link.relay;
+    this.keys = keys;
+    if (cached) {
+      this.cursors = cached.cursors;
+      this.update({ chats: cached.chats, messages: cached.messages });
+    }
     this.connect();
   }
 
   private reset(): void {
+    this.generation++;
     this.disconnect();
+    for (const settle of [...this.waiters.values()]) settle({ ok: false, error: 'offline' });
+    this.pending.clear();
     this.relay = undefined;
     this.keys = undefined;
     this.cursors = {};
@@ -155,6 +212,7 @@ class HeyLoopClient {
       clearInterval(this.ping);
       this.ping = setInterval(() => this.ws?.send('ping'), PING_MS);
       this.update({ status: 'online' });
+      for (const [id, pending] of this.pending) this.transmit(id, pending);
     } else if (frame.t === 'peer') {
       this.update({ computerOnline: frame.online });
       // The relay sends peer status right after ready, so this also covers the initial sync.
@@ -177,21 +235,30 @@ class HeyLoopClient {
       const byId = new Map(this.snapshot.chats.map((c) => [c.chat_id, c]));
       for (const chat of frame.chats) byId.set(chat.chat_id, chat);
       this.update({ chats: [...byId.values()] });
+      this.cache.persist({ chats: frame.chats, envelopes: [], cursors: {} });
     } else if (frame.type === 'envelopes') {
       const messages = { ...this.snapshot.messages };
+      const fresh: Envelope[] = [];
       for (const env of frame.envelopes) {
         const list = messages[env.chat_id] ?? [];
         if (list.some((e) => e.seq === env.seq)) continue;
         messages[env.chat_id] = [...list, env].sort((a, b) => a.seq - b.seq);
+        fresh.push(env);
       }
+      const cursors: Record<string, number> = {};
       for (const chatId of new Set(frame.envelopes.map((e) => e.chat_id))) {
         // Only advance over contiguous seqs so a gap is refilled by the next sync.
         const seqs = new Set(messages[chatId].map((e) => e.seq));
         let cursor = this.cursors[chatId] ?? 0;
         while (seqs.has(cursor + 1)) cursor++;
         this.cursors[chatId] = cursor;
+        cursors[chatId] = cursor;
       }
       this.update({ messages });
+      this.cache.persist({ chats: [], envelopes: fresh, cursors });
+    } else if (frame.type === 'result') {
+      this.pending.delete(frame.ref);
+      this.waiters.get(frame.ref)?.({ ok: frame.ok, error: frame.error });
     }
   }
 

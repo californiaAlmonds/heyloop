@@ -50,6 +50,19 @@ export function lastActivity(chat: Chat, envelopes: Envelope[] | undefined): str
   return last && last > chat.last_heartbeat ? last : chat.last_heartbeat;
 }
 
+const ERROR_MESSAGES: Record<string, string> = {
+  offline: 'Not connected to the relay.',
+  unconfirmed: 'Not confirmed yet. Your computer may be offline; it will be delivered when it reconnects.',
+  already_resolved: 'Already answered or expired.',
+  not_found: 'Your computer no longer knows about this.',
+  invalid_option: 'That option is no longer valid.',
+  text_required: 'Type an answer first.',
+};
+
+export function errorMessage(code: string | undefined): string {
+  return (code && ERROR_MESSAGES[code]) || 'Something went wrong. Try again.';
+}
+
 export function formatTime(ts: string): string {
   const date = new Date(ts);
   const sameDay = date.toDateString() === new Date().toDateString();

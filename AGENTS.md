@@ -21,7 +21,7 @@ HeyLoop connects long-running AI coding agents on a computer to a Telegram-style
 - Smoke test (daemon running): `npm run smoke -w @heyloop/daemon`
 - Relay locally: `npm run dev -w @heyloop/relay` (port 8787, no Cloudflare account needed); pair a test home with `heyloop pair --relay http://127.0.0.1:8787`, restart the daemon, then `npm run smoke:relay -w @heyloop/daemon`.
 - Use a throwaway data dir for tests: `$env:HEYLOOP_HOME = "$env:TEMP\heyloop-test"`; delete it afterwards.
-- Mobile (from `apps/mobile`): `npx expo start` (Expo Go or dev build); `npx expo export --platform android` checks the bundle without a device. Phone reaches a local relay via `adb reverse tcp:8787 tcp:8787`.
+- Mobile (from `apps/mobile`): `npx expo start` (Expo Go or dev build); `npx expo export --platform android` checks the bundle without a device. On a USB phone: `adb reverse tcp:8787 tcp:8787; adb reverse tcp:8081 tcp:8081`, then `adb shell am start --user 0 -a android.intent.action.VIEW -d exp://127.0.0.1:8081 host.exp.exponent`.
 - Shell is Windows PowerShell 5.1: chain with `;`, never `&&`.
 
 ## Layout

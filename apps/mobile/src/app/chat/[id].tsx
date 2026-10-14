@@ -1,10 +1,23 @@
-import type { Envelope } from '@heyloop/protocol';
+import type { Envelope, MessageBody } from '@heyloop/protocol';
 import { Stack, useLocalSearchParams, useTheme } from 'expo-router';
-import { FlatList, Platform, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ApprovalActions } from '@/components/ApprovalActions';
+import { Composer, RenameModal } from '@/components/Composer';
 import { useHeyLoop } from '@/lib/client';
 import { STATUS_COLORS, STATUS_LABELS, describe, formatTime, pendingApprovals } from '@/lib/format';
 
 const LEVEL_COLORS = { info: '#9aa0a6', progress: '#2f80ed', success: '#30a46c', warning: '#f2a20c', error: '#e5484d' };
+const HIGHLIGHT_COLOR = '#f2a20c';
+const HIGHLIGHT_MS = 1500;
+
+type ApprovalResponse = Extract<MessageBody, { kind: 'approval_response' }>;
+
+function answerLabel(body: ApprovalResponse, quoted?: Envelope): string {
+  if (body.text) return body.text;
+  const request = quoted?.body.kind === 'approval_request' ? quoted.body : undefined;
+  return request?.options?.find((o) => o.id === body.option_id)?.label ?? body.option_id ?? 'Answered';
+}
 
 export default function Conversation() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -13,11 +26,38 @@ export default function Conversation() {
   const chat = snap.chats.find((c) => c.chat_id === id);
   const envelopes = snap.messages[id] ?? [];
   const pending = new Set(pendingApprovals(envelopes).map((r) => r.request_id));
+  const requests = new Map(
+    envelopes.flatMap((e) => (e.body.kind === 'approval_request' ? [[e.body.request_id, e] as const] : [])),
+  );
   const visible = envelopes.filter((e) => describe(e.body)).reverse();
+  const [renaming, setRenaming] = useState(false);
+  const [highlight, setHighlight] = useState<string>();
+  const list = useRef<FlatList<Envelope>>(null);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  const jumpTo = (envelopeId: string) => {
+    const index = visible.findIndex((e) => e.id === envelopeId);
+    if (index < 0) return;
+    list.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true });
+    setHighlight(envelopeId);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setHighlight(undefined), HIGHLIGHT_MS);
+  };
 
   return (
-    <View style={styles.fill}>
-      <Stack.Screen options={{ title: chat?.title ?? 'Chat' }} />
+    <KeyboardAvoidingView behavior="padding" style={styles.fill}>
+      <Stack.Screen
+        options={{
+          title: chat?.title ?? 'Chat',
+          headerRight: () =>
+            chat && (
+              <Pressable accessibilityRole="button" onPress={() => setRenaming(true)} hitSlop={8}>
+                <Text style={{ color: colors.primary, fontSize: 16 }}>Rename</Text>
+              </Pressable>
+            ),
+        }}
+      />
       {chat && (
         <View style={[styles.statusBar, { borderColor: colors.border }]}>
           <View style={[styles.dot, { backgroundColor: STATUS_COLORS[chat.status] }]} />
@@ -25,17 +65,42 @@ export default function Conversation() {
         </View>
       )}
       <FlatList
+        ref={list}
         inverted
         data={visible}
+        extraData={highlight}
         keyExtractor={(e) => e.id}
         contentContainerStyle={styles.list}
-        renderItem={({ item }) => <Message envelope={item} pending={pending} />}
+        keyboardShouldPersistTaps="handled"
+        onScrollToIndexFailed={({ index, averageItemLength }) => {
+          // Target isn't rendered yet: approximate the offset, then retry once it is measured.
+          list.current?.scrollToOffset({ offset: index * averageItemLength, animated: true });
+          setTimeout(() => list.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true }), 150);
+        }}
+        renderItem={({ item }) => (
+          <Message
+            envelope={item}
+            pending={pending}
+            highlighted={item.id === highlight}
+            quoted={item.body.kind === 'approval_response' ? requests.get(item.body.request_id) : undefined}
+            onQuotePress={jumpTo}
+          />
+        )}
       />
-    </View>
+      {chat && <Composer chatId={chat.chat_id} />}
+      {renaming && chat && <RenameModal chatId={chat.chat_id} current={chat.title} onClose={() => setRenaming(false)} />}
+    </KeyboardAvoidingView>
   );
 }
 
-function Message({ envelope, pending }: { envelope: Envelope; pending: Set<string> }) {
+function Message(props: {
+  envelope: Envelope;
+  pending: Set<string>;
+  highlighted: boolean;
+  quoted?: Envelope;
+  onQuotePress: (envelopeId: string) => void;
+}) {
+  const { envelope, pending, highlighted, quoted, onQuotePress } = props;
   const { colors } = useTheme();
   const { body, sender, ts } = envelope;
 
@@ -52,10 +117,26 @@ function Message({ envelope, pending }: { envelope: Envelope; pending: Set<strin
 
   return (
     <View style={bubble}>
+      {highlighted && <View pointerEvents="none" style={styles.highlight} />}
       {body.kind === 'status' && (
         <View style={[styles.level, { backgroundColor: LEVEL_COLORS[body.level] }]} />
       )}
-      {body.kind === 'approval_request' ? (
+      {body.kind === 'approval_response' && quoted?.body.kind === 'approval_request' && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Show the original question"
+          onPress={() => onQuotePress(quoted.id)}
+          style={styles.quote}
+        >
+          <Text style={styles.quoteLabel}>Agent asked</Text>
+          <Text numberOfLines={2} style={styles.quoteText}>
+            {quoted.body.question}
+          </Text>
+        </Pressable>
+      )}
+      {body.kind === 'approval_response' ? (
+        <Text style={[styles.text, textColor]}>{answerLabel(body, quoted)}</Text>
+      ) : body.kind === 'approval_request' ? (
         <>
           <Text style={[styles.label, textColor]}>
             Approval · {body.risk} risk{pending.has(body.request_id) ? ' · waiting' : ''}
@@ -67,6 +148,7 @@ function Message({ envelope, pending }: { envelope: Envelope; pending: Set<strin
               {body.command}
             </Text>
           )}
+          {pending.has(body.request_id) && <ApprovalActions request={body} />}
         </>
       ) : (
         <>
@@ -107,6 +189,17 @@ const styles = StyleSheet.create({
   mine: { alignSelf: 'flex-end', borderWidth: 0 },
   level: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3 },
   label: { fontSize: 12, fontWeight: '600', opacity: 0.7 },
+  highlight: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderWidth: 2, borderColor: HIGHLIGHT_COLOR, borderRadius: 12 },
+  quote: {
+    borderLeftWidth: 3,
+    borderLeftColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  quoteLabel: { color: '#fff', fontSize: 11, fontWeight: '700', opacity: 0.85 },
+  quoteText: { color: '#fff', fontSize: 13, opacity: 0.9 },
   text: { fontSize: 15 },
   detail: { fontSize: 13, opacity: 0.8 },
   command: {

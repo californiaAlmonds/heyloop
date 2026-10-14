@@ -35,6 +35,7 @@ Contracts: [packages/protocol/src/relay.ts](../../packages/protocol/src/relay.ts
 - Connect `wss://<relay>/rooms/<room>/ws?role=daemon|phone`; first frame `{t:'auth', token}`; relay replies `ready` + `peer` status, then drains the queue.
 - `{t:'send', data}` → relay stores for the other role and forwards as `{t:'msg', id, data}`; receiver replies `{t:'ack', id}` to delete.
 - `data` = base64url(nonce ‖ secretbox(JSON app frame)).
+- Liveness: clients send string `ping` every 30s (runtime auto-replies `pong`). A 30s alarm closes sockets silent >75s and broadcasts `peer {online:false}`.
 - Daemon → phone: `chats` (upsert list + machine), `envelopes` (batch), `result` (ref to phone frame id).
 - Phone → daemon: `sync` (per-chat cursors), `answer`, `say`, `rename`, `presence`; each has a ULID `id` for dedupe.
 
