@@ -1,5 +1,11 @@
 import { deriveKeys, open, seal, type PairingKeys } from '@heyloop/protocol/crypto';
-import { PhoneFrame, RelayServerFrame, type DaemonFrame, type PushHint } from '@heyloop/protocol/relay';
+import {
+  MAX_FRAME_CHARS,
+  PhoneFrame,
+  RelayServerFrame,
+  type DaemonFrame,
+  type PushHint,
+} from '@heyloop/protocol/relay';
 import type { Envelope } from '@heyloop/protocol';
 import type { ApprovalBroker } from './broker.js';
 import type { Config } from './config.js';
@@ -8,6 +14,9 @@ import type { Store } from './store.js';
 const PING_MS = 30_000;
 const MAX_BACKOFF_MS = 30_000;
 const SYNC_BATCH = 100;
+// Base64 expands 4/3 (+40B nonce/MAC and send wrapper); leave 4 KiB plaintext margin under MAX_FRAME_CHARS.
+const SYNC_MAX_BYTES = Math.floor((MAX_FRAME_CHARS * 3) / 4) - 4096;
+const ENVELOPES_FRAME_OVERHEAD = Buffer.byteLength(JSON.stringify({ type: 'envelopes', envelopes: [] }));
 
 /** Outbound connection to the relay; everything past the relay frame layer is end-to-end encrypted. */
 export class RelayClient {
@@ -101,8 +110,8 @@ export class RelayClient {
         this.sendFrame({ type: 'chats', machine: this.machine, chats });
         for (const chat of chats) {
           const envelopes = this.store.messagesSince(chat.chat_id, frame.cursors[chat.chat_id] ?? 0);
-          for (let i = 0; i < envelopes.length; i += SYNC_BATCH) {
-            this.sendFrame({ type: 'envelopes', envelopes: envelopes.slice(i, i + SYNC_BATCH) });
+          for (const batch of batchEnvelopes(envelopes)) {
+            this.sendFrame({ type: 'envelopes', envelopes: batch });
           }
         }
         return reply(true);
@@ -135,6 +144,26 @@ export class RelayClient {
     if (!this.ready || this.ws?.readyState !== WebSocket.OPEN) return;
     this.ws.send(JSON.stringify({ t: 'send', data: seal(this.keys.key, frame), push }));
   }
+}
+
+export function batchEnvelopes(envelopes: Envelope[]): Envelope[][] {
+  const batches: Envelope[][] = [];
+  let batch: Envelope[] = [];
+  let bytes = ENVELOPES_FRAME_OVERHEAD;
+  for (const env of envelopes) {
+    const envBytes = Buffer.byteLength(JSON.stringify(env));
+    const added = batch.length === 0 ? envBytes : 1 + envBytes;
+    if (batch.length > 0 && (batch.length >= SYNC_BATCH || bytes + added > SYNC_MAX_BYTES)) {
+      batches.push(batch);
+      batch = [env];
+      bytes = ENVELOPES_FRAME_OVERHEAD + envBytes;
+    } else {
+      batch.push(env);
+      bytes += added;
+    }
+  }
+  if (batch.length > 0) batches.push(batch);
+  return batches;
 }
 
 function pushHint({ sender, body }: Envelope): PushHint | undefined {

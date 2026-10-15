@@ -10,9 +10,20 @@ export type RelayRole = z.infer<typeof RelayRole>;
 export const PushHint = z.enum(['approval', 'update']);
 export type PushHint = z.infer<typeof PushHint>;
 
+export const MAX_FRAME_CHARS = 512 * 1024;
+const NONCE_BYTES = 24;
+const MAC_BYTES = 16;
+const MIN_CIPHERTEXT_LENGTH = Math.ceil(((NONCE_BYTES + MAC_BYTES) * 4) / 3);
+const SEND_ENVELOPE_CHARS = JSON.stringify({ t: 'send', data: '', push: 'approval' }).length;
+const MAX_CIPHERTEXT_LENGTH = MAX_FRAME_CHARS - SEND_ENVELOPE_CHARS;
+
 export const RelayClientFrame = z.discriminatedUnion('t', [
   z.object({ t: z.literal('auth'), token: z.string().min(40).max(100) }),
-  z.object({ t: z.literal('send'), data: z.string().min(1), push: PushHint.optional() }),
+  z.object({
+    t: z.literal('send'),
+    data: z.string().min(MIN_CIPHERTEXT_LENGTH).max(MAX_CIPHERTEXT_LENGTH).regex(/^[A-Za-z0-9_-]+$/),
+    push: PushHint.optional(),
+  }),
   z.object({ t: z.literal('ack'), id: z.string().min(1).max(40) }),
   // Phone only: native FCM registration token for doorbell pushes.
   z.object({ t: z.literal('push'), token: z.string().min(1).max(4096) }),
