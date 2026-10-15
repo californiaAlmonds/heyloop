@@ -1,5 +1,11 @@
 import { DurableObject } from 'cloudflare:workers';
-import { RelayClientFrame, type PushHint, type RelayRole, type RelayServerFrame } from '@heyloop/protocol/relay';
+import {
+  MAX_FRAME_CHARS,
+  RelayClientFrame,
+  type PushHint,
+  type RelayRole,
+  type RelayServerFrame,
+} from '@heyloop/protocol/relay';
 import { sendDoorbell } from './fcm.js';
 
 interface Env {
@@ -15,7 +21,6 @@ interface Attachment {
 }
 
 const ROOM_PATH = /^\/rooms\/([A-Za-z0-9_-]{22})\/ws$/;
-const MAX_FRAME_CHARS = 512 * 1024;
 const MAX_QUEUE = 2000;
 // Clients ping every 30s; sleeping laptops and dozing phones vanish without a close frame.
 const STALE_MS = 75_000;
