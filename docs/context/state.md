@@ -1,6 +1,6 @@
 # Current State
 
-Updated: 2026-10-02
+Updated: 2026-10-15
 
 ## Phase
 Phase 1 (MVP): daemon **done** · relay **done (local)** · Android app **in progress** (pairing + chat list + read-only conversation)
@@ -29,6 +29,8 @@ Phase 1 (MVP): daemon **done** · relay **done (local)** · Android app **in pro
 - Root `package.json` devDependencies pin `react`/`react-dom` to `19.2.3` (Expo SDK 57) so peers hoist one copy (npm `overrides` didn't survive `expo install`). After any `expo install`, check `node_modules/react` is 19.2.3.
 - Verified on a real Android phone (Expo Go 57, USB + `adb reverse` for 8787/8081): QR pairing, sync, chat list, conversation, live updates from desktop.
 - Relay liveness: sockets silent >75s are closed by a 30s alarm sweep and the peer is told `online:false` (verified with a silent fake daemon: offline at ~90s).
+- Frame limits: `MAX_FRAME_CHARS` (512 KiB) shared from `@heyloop/protocol/relay`; relay rejects `send.data` that isn't base64url ciphertext (min nonce+MAC, max frame); daemon sync batches envelopes by size (≤100/batch). README has a "Self-hosting the relay" guide.
+- Dev workflow: Opus lead + Gemini 4 Argon coders via the user-level `gemini-worker` MCP (Vertex), parallel worktrees in `E:\heyloop-wt\`; see `.github/copilot-instructions.md`.
 - Verified: workspace typecheck, `expo-doctor` 21/21, `expo export --platform android`, `smoke:relay` 7/7.
 - GitHub repo `californiaAlmonds/heyloop` is public; four existing commits pushed unchanged, `origin/main` configured.
 - Branch policy: `develop-californiaAlmonds` updates restricted to personal-repo owner (admin bypass); `main` requires PRs, up-to-date Typecheck + Daemon smoke checks, resolved conversations; admins enforced, no force pushes/deletion. No mandatory second-person review.
@@ -41,6 +43,7 @@ Phase 1 (MVP): daemon **done** · relay **done (local)** · Android app **in pro
 1. Install the EAS development build on the phone, pair against the deployed relay, and verify a real doorbell push (app backgrounded, approval from the daemon).
 2. Presence + 30s desktop-first routing gate and stall nudge; deploy docs (README) for self-hosters.
 3. Cache limits: no pruning and only the newest 300 envelopes per chat are loaded (no lazy older history yet).
+4. Robustness backlog: daemon `relay-client.ts` calls `open()`/`JSON.parse` on relay frames without try/catch (malformed frame can throw in the listener); sync `chats` frame and phone `sync` cursors are unbatched (could exceed the frame limit with very many chats); add a unit test for `batchEnvelopes`.
 
 ## Open items
 - `LICENSE` file — needs copyright holder name (package.json says MIT).
