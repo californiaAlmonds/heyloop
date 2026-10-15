@@ -89,6 +89,48 @@ Run commands with `npm run cli -w @heyloop/daemon -- <command>`:
 | `pair` | Show the existing pairing QR again |
 | `unpair` | Remove pairing; restart the daemon afterward |
 
+## Self-hosting the relay
+
+The relay in `apps/relay` (`apps/relay/wrangler.jsonc`) runs as a Cloudflare Worker (`heyloop-relay`) backed by a SQLite Durable Object (`Room`, bound as `ROOM`) for each pairing room.
+
+**Prerequisites:** a Cloudflare account with Workers and Durable Objects, plus `wrangler` (declared in `apps/relay/package.json` `devDependencies`). Authenticate once before deploying:
+
+```sh
+npx wrangler login
+```
+
+**Deploy the Worker:**
+
+```sh
+npm run deploy -w @heyloop/relay
+```
+
+This runs `wrangler deploy`. No public inbound port or tunnel is needed on your computer.
+
+**Optional push notifications (`FCM_SERVICE_ACCOUNT`):**
+- `FCM_SERVICE_ACCOUNT` is an optional Wrangler secret containing a Firebase service-account JSON (`client_email`, `private_key`, `project_id`). Treat this JSON as a credential and never commit it.
+- To set it on your deployed Worker, run `npx wrangler secret put FCM_SERVICE_ACCOUNT` from `apps/relay` and paste the JSON when prompted.
+- For local `npm run dev -w @heyloop/relay`, Wrangler reads secrets from `apps/relay/.dev.vars` (git-ignored) as `FCM_SERVICE_ACCOUNT=<json on one line>`.
+- When set, the relay sends content-free FCM doorbell notifications (`approval` and `update` hints) when the daemon sends a push hint and the phone is offline.
+- When `FCM_SERVICE_ACCOUNT` is unset, push notifications are disabled; encrypted WebSocket relaying and Durable Object message queueing still work.
+
+**Pair the daemon to your relay URL:**
+
+```sh
+npm run cli -w @heyloop/daemon -- pair --relay <url>
+# or: heyloop pair --relay <url>
+```
+
+Relay URLs must use `https://`; `http://` is allowed only for loopback hosts (`127.0.0.1`, `localhost`, `[::1]`). Scan the QR code and restart the daemon to connect with the new pairing.
+
+**Local testing:**
+
+```sh
+npm run dev -w @heyloop/relay
+```
+
+This runs `wrangler dev --ip 127.0.0.1 --port 8787`; pair with `http://127.0.0.1:8787` and restart the daemon.
+
 ## How It Works
 
 ```text
