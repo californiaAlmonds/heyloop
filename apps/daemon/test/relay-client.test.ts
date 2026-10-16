@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { Envelope } from '@heyloop/protocol';
+import type { Chat, Envelope } from '@heyloop/protocol';
 import { deriveKeys, newPairingSecret, seal } from '@heyloop/protocol/crypto';
 import { MAX_FRAME_CHARS } from '@heyloop/protocol/relay';
-import { batchEnvelopes } from '../src/relay-client.js';
+import { batchChats, batchEnvelopes } from '../src/relay-client.js';
 
 function makeEnvelope(seq: number, text = 'hello'): Envelope {
   return {
@@ -83,6 +83,40 @@ describe('batchEnvelopes', () => {
         push: 'approval',
       });
       assert.ok(wire.length <= MAX_FRAME_CHARS);
+    }
+  });
+});
+
+function makeChat(i: number, title = `chat ${i}`): Chat {
+  return {
+    chat_id: `chat-${i}`,
+    machine_id: 'machine-1',
+    source: 'vscode',
+    title,
+    title_locked: false,
+    status: 'running',
+    last_heartbeat: '2026-01-01T00:00:00.000Z',
+    created_at: '2026-01-01T00:00:00.000Z',
+  };
+}
+
+describe('batchChats', () => {
+  const machine = { id: 'machine-1', name: 'desk' };
+
+  it('keeps a normal chat list in one batch', () => {
+    const chats = Array.from({ length: 50 }, (_, i) => makeChat(i));
+    assert.deepEqual(batchChats(chats, machine), [chats]);
+  });
+
+  it('splits very large chat lists so every sealed frame fits MAX_FRAME_CHARS', () => {
+    const { key } = deriveKeys(newPairingSecret());
+    const chats = Array.from({ length: 400 }, (_, i) => makeChat(i, 't'.repeat(2_000)));
+    const batches = batchChats(chats, machine);
+    assert.ok(batches.length > 1);
+    assert.deepEqual(batches.flat(), chats);
+    for (const batch of batches) {
+      const wire = JSON.stringify({ t: 'send', data: seal(key, { type: 'chats', machine, chats: batch }) });
+      assert.ok(wire.length <= MAX_FRAME_CHARS, `wire ${wire.length} > ${MAX_FRAME_CHARS}`);
     }
   });
 });
