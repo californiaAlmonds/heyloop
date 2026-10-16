@@ -39,7 +39,8 @@ export function userInstructionsPath(): string {
   return join(vscodeUserDir(), 'prompts', 'heyloop.instructions.md');
 }
 
-export function writeMcpJson(file: string, port: number): boolean {
+/** Pass `token` only for the user-level file (never committed); workspace files get a password prompt instead. */
+export function writeMcpJson(file: string, port: number, token?: string): boolean {
   const input = {
     type: 'promptString',
     id: 'heyloop-token',
@@ -49,13 +50,14 @@ export function writeMcpJson(file: string, port: number): boolean {
   const server = {
     type: 'http',
     url: `http://127.0.0.1:${port}/mcp`,
-    headers: { Authorization: 'Bearer ${input:heyloop-token}' },
+    headers: { Authorization: token ? `Bearer ${token}` : 'Bearer ${input:heyloop-token}' },
   };
 
   let doc: { inputs?: { id: string }[]; servers?: Record<string, unknown> } = {};
   const manual = (why: string) => {
+    const shown = token ? { servers: { heyloop: { ...server, headers: { Authorization: 'Bearer <output of: heyloop token>' } } } } : { inputs: [input], servers: { heyloop: server } };
     console.log(`${file} ${why}. Add this manually:\n`);
-    console.log(JSON.stringify({ inputs: [input], servers: { heyloop: server } }, null, 2));
+    console.log(JSON.stringify(shown, null, 2));
     return false;
   };
   if (existsSync(file)) {
@@ -69,12 +71,14 @@ export function writeMcpJson(file: string, port: number): boolean {
       return manual('has an unexpected shape');
     }
   }
-  doc.inputs = [...(doc.inputs ?? []).filter((i) => i.id !== input.id), input];
+  const otherInputs = (doc.inputs ?? []).filter((i) => i.id !== input.id);
+  doc.inputs = token ? otherInputs : [...otherInputs, input];
+  if (!doc.inputs.length) delete doc.inputs;
   doc.servers = { ...doc.servers, heyloop: server };
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, JSON.stringify(doc, null, 2) + '\n');
   console.log(`Wrote ${file}`);
-  console.log('VS Code will ask for the token when the server starts. Get it with: heyloop token');
+  if (!token) console.log('VS Code will ask for the token when the server starts. Get it with: heyloop token');
   return true;
 }
 
@@ -85,7 +89,7 @@ export function setupVscodeWorkspace(config: Config, dir: string): void {
 }
 
 export function setupVscodeUser(config: Config): void {
-  writeMcpJson(userMcpJsonPath(), config.port);
+  writeMcpJson(userMcpJsonPath(), config.port, config.token);
 
   const instructionsFile = userInstructionsPath();
   if (existsSync(instructionsFile) && !readFileSync(instructionsFile, 'utf8').includes(MANAGED_COMMENT)) {

@@ -1,6 +1,7 @@
 import QRCode from 'qrcode';
 import { formatPairingLink, newPairingSecret, normalizeRelayUrl } from '@heyloop/protocol/crypto';
 import { handleAutostart, isAutostartInstalled } from './autostart.js';
+import { randomBytes } from 'node:crypto';
 import { loadConfig, saveConfig, type Config } from './config.js';
 import { startDaemon } from './server.js';
 import {
@@ -17,6 +18,7 @@ const USAGE = `heyloop <command>
   start                         Run the daemon (MCP server + local API)
   status                        Show daemon, relay, autostart, and VS Code setup status
   token                         Print the daemon token for MCP clients
+  token rotate                  Replace the daemon token (re-run setup afterwards)
   setup vscode [dir]            Add HeyLoop to <dir>/.vscode/mcp.json (default: current folder)
   setup vscode --user           Add HeyLoop to user VS Code mcp.json and install agent instructions
   autostart install|uninstall|status  Manage Windows login autostart launcher
@@ -99,6 +101,12 @@ async function main(argv: string[]): Promise<void> {
       await showStatus(config);
       return;
     case 'token':
+      if (rest[0] === 'rotate') {
+        config.token = randomBytes(32).toString('base64url');
+        saveConfig(config);
+        console.log('Token rotated. Restart the daemon, then run: heyloop setup vscode --user');
+        return;
+      }
       console.log(config.token);
       return;
     case 'pair': {

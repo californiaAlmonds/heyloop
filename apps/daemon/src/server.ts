@@ -135,7 +135,8 @@ export function startDaemon(config: Config): Server {
   const server = createServer(async (req, res) => {
     try {
       if (!allowedHosts.has(req.headers.host ?? '')) throw new HttpError(403, 'Forbidden host');
-      if (!isAuthorized(req, config.token)) throw new HttpError(401, 'Unauthorized');
+      // 403, not 401: a 401 makes VS Code start an OAuth sign-in flow HeyLoop doesn't support.
+      if (!isAuthorized(req, config.token)) throw new HttpError(403, 'Missing or wrong HeyLoop token. Run: heyloop setup vscode --user');
       const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
       if (url.pathname === '/mcp') return await handleMcp(req, res);
       if (url.pathname.startsWith('/api/')) return await handleApi(req, res, url);
