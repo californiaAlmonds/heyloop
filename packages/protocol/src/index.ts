@@ -178,3 +178,13 @@ export const DEFAULT_CONFIRM_OPTIONS: ApprovalOption[] = [
   { id: 'approve', label: 'Approve', style: 'primary' },
   { id: 'reject', label: 'Reject', style: 'danger' },
 ];
+
+// ---- Daemon <-> VS Code extension (localhost, bearer token) ----
+// The extension keeps GET /api/windows/events?id=<window_id>&name=<workspace name> open as an SSE stream;
+// the window is listed on the phone while that stream is connected.
+
+export const ExtensionEvent = z.discriminatedUnion('type', [
+  // Open a new Copilot chat in Agent mode and auto-submit `prompt`.
+  z.object({ type: z.literal('new_chat'), chat_id: z.string(), chat_key: z.string(), prompt: z.string() }),
+]);
+export type ExtensionEvent = z.infer<typeof ExtensionEvent>;
