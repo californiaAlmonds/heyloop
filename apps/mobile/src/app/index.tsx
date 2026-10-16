@@ -1,10 +1,11 @@
-import { Link, Redirect, Stack, useTheme } from 'expo-router';
+import { Link, Redirect, Stack, useRouter, useTheme } from 'expo-router';
 import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { client, useHeyLoop, type Snapshot } from '@/lib/client';
 import { STATUS_COLORS, describe, formatTime, lastActivity, pendingApprovals } from '@/lib/format';
 
 export default function ChatList() {
   const snap = useHeyLoop();
+  const router = useRouter();
   const { colors } = useTheme();
 
   if (!snap.loaded) return <ActivityIndicator style={styles.fill} />;
@@ -13,6 +14,7 @@ export default function ChatList() {
   const chats = [...snap.chats].sort((a, b) =>
     lastActivity(b, snap.messages[b.chat_id]).localeCompare(lastActivity(a, snap.messages[a.chat_id])),
   );
+  const canStartChat = snap.status === 'online' && snap.computerOnline && snap.workspaces.length > 0;
 
   const confirmUnpair = () =>
     Alert.alert('Unpair this computer?', 'You will need to scan its QR code again.', [
@@ -26,13 +28,31 @@ export default function ChatList() {
         options={{
           title: snap.pairing.name,
           headerRight: () => (
-            <Pressable onPress={confirmUnpair} hitSlop={8}>
-              <Text style={{ color: colors.primary }}>Unpair</Text>
-            </Pressable>
+            <View style={styles.headerActions}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="New chat"
+                disabled={!canStartChat}
+                onPress={() => router.push('/new')}
+                hitSlop={8}
+              >
+                <Text style={[styles.headerAction, { color: colors.primary, opacity: canStartChat ? 1 : 0.4 }]}>
+                  New chat
+                </Text>
+              </Pressable>
+              <Pressable accessibilityRole="button" accessibilityLabel="Unpair" onPress={confirmUnpair} hitSlop={8}>
+                <Text style={{ color: colors.primary }}>Unpair</Text>
+              </Pressable>
+            </View>
           ),
         }}
       />
       <ConnectionBanner snap={snap} />
+      {snap.status === 'online' && snap.computerOnline && snap.workspaces.length === 0 && (
+        <Text style={[styles.hint, { color: colors.text, borderColor: colors.border }]}>
+          Open VS Code with the HeyLoop extension
+        </Text>
+      )}
       <FlatList
         data={chats}
         keyExtractor={(c) => c.chat_id}
@@ -89,7 +109,7 @@ function ConnectionBanner({ snap }: { snap: Snapshot }) {
     <View style={styles.banner}>
       <Text style={styles.bannerText}>{message}</Text>
       {snap.status !== 'connecting' && snap.status !== 'online' && (
-        <Pressable onPress={() => client.reconnectNow()} hitSlop={8}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Retry connection" onPress={() => client.reconnectNow()} hitSlop={8}>
           <Text style={styles.bannerAction}>Retry</Text>
         </Pressable>
       )}
@@ -99,6 +119,15 @@ function ConnectionBanner({ snap }: { snap: Snapshot }) {
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  headerAction: { fontWeight: '600' },
+  hint: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    fontSize: 13,
+    opacity: 0.7,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
   banner: {
     flexDirection: 'row',
     alignItems: 'center',

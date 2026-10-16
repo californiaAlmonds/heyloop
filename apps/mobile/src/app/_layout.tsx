@@ -15,6 +15,7 @@ export default function RootLayout() {
     <ThemeProvider value={scheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack>
         <Stack.Screen name="index" options={{ title: 'HeyLoop' }} />
+        <Stack.Screen name="new" options={{ title: 'New chat' }} />
         <Stack.Screen name="pair" options={{ title: 'Pair computer' }} />
         <Stack.Screen name="chat/[id]" options={{ title: '' }} />
       </Stack>
