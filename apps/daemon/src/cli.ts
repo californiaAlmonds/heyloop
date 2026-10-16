@@ -1,15 +1,25 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
 import QRCode from 'qrcode';
 import { formatPairingLink, newPairingSecret, normalizeRelayUrl } from '@heyloop/protocol/crypto';
+import { handleAutostart, isAutostartInstalled } from './autostart.js';
 import { loadConfig, saveConfig, type Config } from './config.js';
 import { startDaemon } from './server.js';
+import {
+  hasUserInstructions,
+  hasUserMcpServer,
+  setupVscodeUser,
+  setupVscodeWorkspace,
+  userInstructionsPath,
+  userMcpJsonPath,
+} from './vscode.js';
 
 const USAGE = `heyloop <command>
 
   start                         Run the daemon (MCP server + local API)
+  status                        Show daemon, relay, autostart, and VS Code setup status
   token                         Print the daemon token for MCP clients
   setup vscode [dir]            Add HeyLoop to <dir>/.vscode/mcp.json (default: current folder)
+  setup vscode --user           Add HeyLoop to user VS Code mcp.json and install agent instructions
+  autostart install|uninstall|status  Manage Windows login autostart launcher
   pair --relay <url>            Create a new phone pairing (replaces the old one)
   pair                          Show the current pairing QR code again
   unpair                        Remove the phone pairing
@@ -18,21 +28,6 @@ const USAGE = `heyloop <command>
   answer <request_id> <option>  Answer with an option id (e.g. approve, reject)
   answer <request_id> --text "..."
   say <chat_id> <text...>       Send a message to an agent's inbox`;
-
-const VSCODE_NOTICE = `
-Heads-up: VS Code asks for confirmation itself
-  Copilot shows its own "Allow" prompt for terminal commands and tools. HeyLoop cannot
-  see or answer those, so an unattended agent can stall on one.
-
-  Recommended: auto-approve only safe commands in your VS Code settings, e.g.
-    "chat.tools.terminal.enableAutoApprove": true,
-    "chat.tools.terminal.autoApprove": {
-      "/^git (status|diff|log|show|branch)\\\\b/": true,
-      "/^npm (test|run (test|lint|typecheck|build))\\\\b/": true
-    }
-  Do NOT enable "chat.tools.global.autoApprove"; it disables every safety prompt.
-  Leave risky commands to be approved through HeyLoop.
-`;
 
 async function api(config: Config, method: string, path: string, body?: unknown): Promise<unknown> {
   let res: Response;
@@ -50,39 +45,25 @@ async function api(config: Config, method: string, path: string, body?: unknown)
   return data;
 }
 
-function setupVscode(config: Config, dir: string): void {
-  const vscodeDir = join(resolve(dir), '.vscode');
-  const file = join(vscodeDir, 'mcp.json');
-  const input = {
-    type: 'promptString',
-    id: 'heyloop-token',
-    description: 'HeyLoop daemon token (run: heyloop token)',
-    password: true,
-  };
-  const server = {
-    type: 'http',
-    url: `http://127.0.0.1:${config.port}/mcp`,
-    headers: { Authorization: 'Bearer ${input:heyloop-token}' },
-  };
-
-  let doc: { inputs?: { id: string }[]; servers?: Record<string, unknown> } = {};
-  if (existsSync(file)) {
-    try {
-      doc = JSON.parse(readFileSync(file, 'utf8'));
-    } catch {
-      console.log(`${file} has comments or invalid JSON. Add this manually:\n`);
-      console.log(JSON.stringify({ inputs: [input], servers: { heyloop: server } }, null, 2));
-      console.log(VSCODE_NOTICE);
-      return;
-    }
+async function showStatus(config: Config): Promise<void> {
+  let running = false;
+  try {
+    const res = await fetch(`http://127.0.0.1:${config.port}/api/chats`, {
+      headers: { authorization: `Bearer ${config.token}` },
+      signal: AbortSignal.timeout(1500),
+    });
+    running = res.ok;
+  } catch {
+    running = false;
   }
-  doc.inputs = [...(doc.inputs ?? []).filter((i) => i.id !== input.id), input];
-  doc.servers = { ...doc.servers, heyloop: server };
-  mkdirSync(vscodeDir, { recursive: true });
-  writeFileSync(file, JSON.stringify(doc, null, 2) + '\n');
-  console.log(`Wrote ${file}`);
-  console.log('VS Code will ask for the token when the server starts. Get it with: heyloop token');
-  console.log(VSCODE_NOTICE);
+
+  console.log(`Daemon:             ${running ? `running (http://127.0.0.1:${config.port})` : 'not running'}`);
+  console.log(`Port:               ${config.port}`);
+  console.log(`Machine:            ${config.machine_name}`);
+  console.log(`Relay:              ${config.relay ? config.relay.url : 'not paired'}`);
+  console.log(`Autostart:          ${isAutostartInstalled() ? 'yes' : 'no'}`);
+  console.log(`VS Code MCP:        ${hasUserMcpServer() ? 'yes' : 'no'} (${userMcpJsonPath()})`);
+  console.log(`Agent instructions: ${hasUserInstructions() ? 'yes' : 'no'} (${userInstructionsPath()})`);
 }
 
 async function pair(config: Config, relayUrl: string | undefined): Promise<void> {
@@ -114,6 +95,9 @@ async function main(argv: string[]): Promise<void> {
       });
       return;
     }
+    case 'status':
+      await showStatus(config);
+      return;
     case 'token':
       console.log(config.token);
       return;
@@ -128,8 +112,15 @@ async function main(argv: string[]): Promise<void> {
       console.log('Pairing removed. Restart the daemon to disconnect.');
       return;
     case 'setup':
-      if (rest[0] !== 'vscode') throw new Error('Usage: heyloop setup vscode [dir]');
-      setupVscode(config, rest[1] ?? process.cwd());
+      if (rest[0] !== 'vscode') throw new Error('Usage: heyloop setup vscode [--user | dir]');
+      if (rest[1] === '--user') {
+        setupVscodeUser(config);
+      } else {
+        setupVscodeWorkspace(config, rest[1] ?? process.cwd());
+      }
+      return;
+    case 'autostart':
+      handleAutostart(rest[0]);
       return;
     case 'chats': {
       const chats = (await api(config, 'GET', '/chats')) as { chat_id: string; status: string; title: string }[];

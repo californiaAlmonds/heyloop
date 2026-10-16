@@ -77,15 +77,22 @@ Pair with the resulting HTTPS Worker URL and restart the daemon. No public inbou
 
 ## CLI
 
-Run commands with `npm run cli -w @heyloop/daemon -- <command>`:
+Run commands with `npm run cli -w @heyloop/daemon -- <command>` (or `heyloop <command>`):
 
 | Command | Purpose |
 | --- | --- |
+| `start` | Run the daemon (MCP server and local API) |
+| `status` | Show daemon, relay, autostart, and VS Code setup status |
+| `token` | Print the daemon token for MCP clients |
+| `setup vscode [dir]` | Add HeyLoop to `<dir>/.vscode/mcp.json` |
+| `setup vscode --user` | Add HeyLoop to user-level VS Code `mcp.json` and install agent instructions |
+| `autostart install\|uninstall\|status` | Manage the Windows login autostart launcher |
 | `chats` | List conversations and status |
 | `pending` | List approval requests, verbatim commands, and options |
 | `answer <request_id> <option_id>` | Answer a pending request |
 | `answer <request_id> --text "..."` | Send a free-text answer |
 | `say <chat_id> <text...>` | Queue a message for the agent's next status call |
+| `pair --relay <url>` | Create a new phone pairing |
 | `pair` | Show the existing pairing QR again |
 | `unpair` | Remove pairing; restart the daemon afterward |
 
