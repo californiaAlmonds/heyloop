@@ -138,10 +138,21 @@ export class RelayClient {
         const result = this.broker.answer(frame.request_id, { option_id: frame.option_id, text: frame.text }, 'phone');
         return result.ok ? reply(true) : reply(false, result.error);
       }
-      case 'say':
+      case 'say': {
         if (!this.store.getChat(frame.chat_id)) return reply(false, 'not_found');
-        this.store.append(frame.chat_id, 'user', { kind: 'text', text: frame.text });
+        const env = this.store.append(frame.chat_id, 'user', { kind: 'text', text: frame.text });
+        const sessionId = this.store.getVscodeSession(frame.chat_id);
+        if (sessionId) {
+          this.windows.broadcast({
+            type: 'prompt',
+            message_id: env.id,
+            chat_id: frame.chat_id,
+            session_id: sessionId,
+            text: frame.text,
+          });
+        }
         return reply(true);
+      }
       case 'rename':
         if (!this.store.getChat(frame.chat_id)) return reply(false, 'not_found');
         this.store.renameChat(frame.chat_id, frame.title, true);

@@ -37,4 +37,10 @@ export class WindowRegistry extends EventEmitter<{ change: [] }> {
     win.write(event);
     return true;
   }
+
+  broadcast(event: ExtensionEvent): void {
+    for (const win of this.windows.values()) {
+      win.write(event);
+    }
+  }
 }
