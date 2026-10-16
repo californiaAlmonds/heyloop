@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS chats (
   title_locked INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL,
   last_heartbeat TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  chat_key TEXT
 );
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY,
@@ -125,9 +126,14 @@ export class Store extends EventEmitter<{ envelope: [Envelope]; chat: [Chat] }> 
     this.db = new DatabaseSync(join(dir, 'heyloop.db'));
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
     this.db.exec(SCHEMA);
+    const cols = this.db.prepare('PRAGMA table_info(chats)').all() as Row[];
+    if (!cols.some((c) => c.name === 'chat_key')) {
+      this.db.exec('ALTER TABLE chats ADD COLUMN chat_key TEXT;');
+    }
+    this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS chats_chat_key ON chats (chat_key) WHERE chat_key IS NOT NULL;');
   }
 
-  createChat(source: ChatSource, title: string): Chat {
+  createChat(source: ChatSource, title: string, chatKey?: string): Chat {
     const ts = now();
     const chat: Chat = {
       chat_id: ulid(),
@@ -140,14 +146,21 @@ export class Store extends EventEmitter<{ envelope: [Envelope]; chat: [Chat] }> 
       created_at: ts,
     };
     this.db
-      .prepare('INSERT INTO chats VALUES (?, ?, ?, ?, 0, ?, ?, ?)')
-      .run(chat.chat_id, chat.machine_id, chat.source, chat.title, chat.status, ts, ts);
+      .prepare(
+        'INSERT INTO chats (chat_id, machine_id, source, title, title_locked, status, last_heartbeat, created_at, chat_key) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)',
+      )
+      .run(chat.chat_id, chat.machine_id, chat.source, chat.title, chat.status, ts, ts, chatKey ?? null);
     this.emit('chat', chat);
     return chat;
   }
 
   getChat(chatId: string): Chat | undefined {
     const row = this.db.prepare('SELECT * FROM chats WHERE chat_id = ?').get(chatId) as Row | undefined;
+    return row ? toChat(row) : undefined;
+  }
+
+  getChatByKey(key: string): Chat | undefined {
+    const row = this.db.prepare('SELECT * FROM chats WHERE chat_key = ?').get(key) as Row | undefined;
     return row ? toChat(row) : undefined;
   }
 

@@ -16,10 +16,39 @@ const call = async (name: string, args: Record<string, unknown>) =>
 
 const tools = await client.listTools();
 console.log('tools:', tools.tools.map((t) => t.name).join(', '));
-assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), ['ask_human_approval', 'await_human_response', 'send_status_update']);
+assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
+  'ask_human_approval',
+  'await_human_response',
+  'check_inbox',
+  'send_status_update',
+]);
 
-const status = await call('send_status_update', { title: 'Smoke test', summary: 'Starting smoke test', level: 'info' });
+const chatKey = `smoke:${Date.now()}`;
+const status = await call('send_status_update', {
+  chat_key: chatKey,
+  title: 'Smoke test',
+  summary: 'Starting smoke test',
+  level: 'info',
+});
 console.log('status:', status);
+
+const reused = await call('send_status_update', {
+  chat_key: chatKey,
+  summary: 'Reusing chat via chat_key',
+  level: 'progress',
+});
+assert.equal(reused.chat_id, status.chat_id);
+
+await fetch(`${base}/api/chats/${status.chat_id}/messages`, {
+  method: 'POST',
+  headers,
+  body: JSON.stringify({ text: 'hello via check_inbox' }),
+});
+const checked1 = await call('check_inbox', { chat_id: status.chat_id });
+assert.equal(checked1.inbox.length, 1);
+assert.equal(checked1.inbox[0].text, 'hello via check_inbox');
+const checked2 = await call('check_inbox', { chat_id: status.chat_id });
+assert.equal(checked2.inbox.length, 0);
 
 await fetch(`${base}/api/chats/${status.chat_id}/messages`, {
   method: 'POST',
