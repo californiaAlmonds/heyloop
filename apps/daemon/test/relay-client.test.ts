@@ -263,15 +263,56 @@ describe('RelayClient new_chat and workspaces', () => {
       client.handle({ type: 'sync', id: 'frame-sync', cursors: {} });
       assert.deepEqual(sentFrames[0], { type: 'workspaces', workspaces: [{ id: 'win-1', name: 'heyloop' }] });
 
+      // Phone say on a chat WITH a session id broadcasts a prompt event to every connected window;
+      // without a delivery ack, the message is still returned by takeInbox.
+      const extEvents2: ExtensionEvent[] = [];
+      const unregister2 = windows.register({ id: 'win-2', name: 'other-ws' }, (ev) => extEvents2.push(ev));
+      extEvents.length = 0;
+
+      store.setVscodeSession(chat.chat_id, 'sess-copilot-1');
+      client.handle({ type: 'say', id: 'frame-say-prompt', chat_id: chat.chat_id, text: 'run the tests next' });
+      assert.deepEqual(store.getResult('frame-say-prompt'), { ok: true, error: undefined });
+
+      assert.equal(extEvents.length, 1);
+      assert.equal(extEvents2.length, 1);
+      assert.equal(extEvents[0]?.type, 'prompt');
+      assert.deepEqual(extEvents[0], extEvents2[0]);
+      if (extEvents[0]?.type === 'prompt') {
+        assert.equal(extEvents[0].chat_id, chat.chat_id);
+        assert.equal(extEvents[0].session_id, 'sess-copilot-1');
+        assert.equal(extEvents[0].text, 'run the tests next');
+      }
+
+      // Without a delivery ack, takeInbox still returns the message.
+      const unackedInbox = store.takeInbox(chat.chat_id);
+      assert.equal(unackedInbox.length, 1);
+      assert.equal(unackedInbox[0]?.text, 'run the tests next');
+      if (extEvents[0]?.type === 'prompt') {
+        assert.equal(unackedInbox[0]?.id, extEvents[0].message_id);
+      }
+
+      // Phone say on a chat WITHOUT a session id emits nothing to connected windows and behaves as before.
+      const chatNoSession = store.createChat('vscode', 'No session chat');
+      extEvents.length = 0;
+      extEvents2.length = 0;
+      client.handle({ type: 'say', id: 'frame-say-nosess', chat_id: chatNoSession.chat_id, text: 'plain inbox msg' });
+      assert.deepEqual(store.getResult('frame-say-nosess'), { ok: true, error: undefined });
+      assert.deepEqual(extEvents, []);
+      assert.deepEqual(extEvents2, []);
+      const plainInbox = store.takeInbox(chatNoSession.chat_id);
+      assert.equal(plainInbox.length, 1);
+      assert.equal(plainInbox[0]?.text, 'plain inbox msg');
+
+      unregister2();
       unregister();
       assert.deepEqual(sentFrames.at(-1), { type: 'workspaces', workspaces: [] });
     }),
   );
 });
 
-describe('GET /api/windows/events SSE route', () => {
+describe('GET /api/windows/events SSE route and POST /api/windows/delivered', () => {
   it(
-    'validates auth and Workspace schema, streams ExtensionEvents over SSE, and unregisters on close',
+    'validates auth and Workspace schema, streams ExtensionEvents over SSE, unregisters on close, and handles delivered acks idempotently',
     withTempDir(async (dir) => {
       const prevHome = process.env.HEYLOOP_HOME;
       process.env.HEYLOOP_HOME = dir;
@@ -294,6 +335,7 @@ describe('GET /api/windows/events SSE route', () => {
           await new Promise<void>((resolve) => srv.once('listening', resolve));
           const base = `http://127.0.0.1:${port}`;
           const headers = { Authorization: 'Bearer test-secret-token' };
+          const jsonHeaders = { ...headers, 'content-type': 'application/json' };
 
           const unauth = await fetch(`${base}/api/windows/events?id=w1&name=proj`);
           assert.equal(unauth.status, 403);
@@ -328,6 +370,56 @@ describe('GET /api/windows/events SSE route', () => {
             await new Promise((r) => setTimeout(r, 20));
           }
           assert.deepEqual(windows.list(), []);
+
+          // POST /api/windows/delivered: auth, schema validation, 404 unknown, marks consumed, idempotent repeat.
+          const unauthDelivered = await fetch(`${base}/api/windows/delivered`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ message_id: 'm1', window_id: 'w1' }),
+          });
+          assert.equal(unauthDelivered.status, 403);
+
+          const badDelivered = await fetch(`${base}/api/windows/delivered`, {
+            method: 'POST',
+            headers: jsonHeaders,
+            body: JSON.stringify({ message_id: '', window_id: 'w1' }),
+          });
+          assert.equal(badDelivered.status, 400);
+
+          const missingDelivered = await fetch(`${base}/api/windows/delivered`, {
+            method: 'POST',
+            headers: jsonHeaders,
+            body: JSON.stringify({ message_id: 'unknown-msg-id', window_id: 'w1' }),
+          });
+          assert.equal(missingDelivered.status, 404);
+
+          const store = new Store(dir, 'm1');
+          const chat = store.createChat('vscode', 'Delivered test');
+          const msg1 = store.append(chat.chat_id, 'user', { kind: 'text', text: 'delivered to window' });
+          const msg2 = store.append(chat.chat_id, 'user', { kind: 'text', text: 'not acked by window' });
+
+          const ack1 = await fetch(`${base}/api/windows/delivered`, {
+            method: 'POST',
+            headers: jsonHeaders,
+            body: JSON.stringify({ message_id: msg1.id, window_id: 'w1' }),
+          });
+          assert.equal(ack1.status, 200);
+          assert.deepEqual(await ack1.json(), { ok: true });
+
+          // Repeated ack for the same message_id returns 200 {ok:true} idempotently.
+          const ackRepeat = await fetch(`${base}/api/windows/delivered`, {
+            method: 'POST',
+            headers: jsonHeaders,
+            body: JSON.stringify({ message_id: msg1.id, window_id: 'w1' }),
+          });
+          assert.equal(ackRepeat.status, 200);
+          assert.deepEqual(await ackRepeat.json(), { ok: true });
+
+          // takeInbox no longer returns the delivered message, but still returns the unacked message.
+          const remainingInbox = store.takeInbox(chat.chat_id);
+          assert.equal(remainingInbox.length, 1);
+          assert.equal(remainingInbox[0]?.id, msg2.id);
+          assert.equal(remainingInbox[0]?.text, 'not acked by window');
         } finally {
           srv.closeAllConnections();
           await new Promise<void>((resolve) => srv.close(() => resolve()));

@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { AnsweredVia } from '@heyloop/protocol';
+import { AnsweredVia, PromptDelivered } from '@heyloop/protocol';
 import { Workspace } from '@heyloop/protocol/relay';
 import { ApprovalBroker } from './broker.js';
 import { dataDir, type Config } from './config.js';
@@ -125,6 +125,13 @@ export function startDaemon(config: Config, windows = new WindowRegistry()): Ser
         unregister();
       });
       return;
+    }
+    if (resource === 'windows' && id === 'delivered' && !sub && req.method === 'POST') {
+      const { message_id } = parse(PromptDelivered, await readJson(req));
+      if (!store.markConsumed(message_id) && !store.hasMessage(message_id)) {
+        throw new HttpError(404, 'Message not found');
+      }
+      return send(res, 200, { ok: true });
     }
     if (resource === 'chats' && !id && req.method === 'GET') {
       return send(res, 200, store.listChats());

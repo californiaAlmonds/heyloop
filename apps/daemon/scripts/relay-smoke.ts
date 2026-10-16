@@ -74,8 +74,8 @@ await mcp.connect(
     requestInit: { headers: { Authorization: `Bearer ${config.token}` } },
   }),
 );
-const call = async (name: string, args: Record<string, unknown>) =>
-  (await mcp.callTool({ name, arguments: args })).structuredContent as Record<string, any>;
+const call = async (name: string, args: Record<string, unknown>, meta?: Record<string, unknown>) =>
+  (await mcp.callTool({ name, arguments: args, _meta: meta })).structuredContent as Record<string, any>;
 
 const intruder = new Phone();
 check('wrong token is rejected', (await intruder.connect('x'.repeat(43))) === 4401);
@@ -155,20 +155,23 @@ const newChatResult = await phone.waitFor((f) => f.type === 'result' && f.ref ==
 const reader = extRes.body!.getReader();
 const decoder = new TextDecoder();
 let sseBuf = '';
-let extEvent: ExtensionEvent | undefined;
-while (!extEvent) {
-  const { value, done } = await reader.read();
-  if (done) break;
-  sseBuf += decoder.decode(value, { stream: true });
-  for (const block of sseBuf.split('\n\n')) {
-    const dataLine = block.split('\n').find((line) => line.startsWith('data: '));
-    if (dataLine) {
-      extEvent = ExtensionEvent.parse(JSON.parse(dataLine.slice(6)));
-      break;
+const readExtEvent = async (): Promise<ExtensionEvent | undefined> => {
+  while (true) {
+    const idx = sseBuf.indexOf('\n\n');
+    if (idx !== -1) {
+      const block = sseBuf.slice(0, idx);
+      sseBuf = sseBuf.slice(idx + 2);
+      const dataLine = block.split('\n').find((line) => line.startsWith('data: '));
+      if (dataLine) return ExtensionEvent.parse(JSON.parse(dataLine.slice(6)));
+      continue;
     }
+    const { value, done } = await reader.read();
+    if (done) return undefined;
+    sseBuf += decoder.decode(value, { stream: true });
   }
-}
-extAc.abort();
+};
+
+const extEvent = await readExtEvent();
 check(
   'new_chat succeeds and emits extension event with chat_key in prompt',
   newChatResult.type === 'result' &&
@@ -177,6 +180,28 @@ check(
     extEvent.chat_key === `phone:${newChatId}` &&
     extEvent.prompt.includes(`phone:${newChatId}`),
 );
+
+const sessionId = `sess-${ulid()}`;
+await call('check_inbox', { chat_id: status.chat_id }, { 'vscode.conversationId': sessionId });
+const promptSayId = ulid();
+phone.send({ type: 'say', id: promptSayId, chat_id: status.chat_id, text: 'follow up into copilot chat' });
+await phone.waitFor((f) => f.type === 'result' && f.ref === promptSayId && f.ok);
+const promptEvent = await readExtEvent();
+check(
+  'phone say on chat with session_id emits prompt event to connected window',
+  promptEvent?.type === 'prompt' &&
+    promptEvent.chat_id === status.chat_id &&
+    promptEvent.session_id === sessionId &&
+    promptEvent.text === 'follow up into copilot chat',
+);
+const ackRes = await fetch(`http://127.0.0.1:${config.port}/api/windows/delivered`, {
+  method: 'POST',
+  headers: { Authorization: `Bearer ${config.token}`, 'content-type': 'application/json' },
+  body: JSON.stringify({ message_id: promptEvent?.type === 'prompt' ? promptEvent.message_id : '', window_id: winId }),
+});
+const afterAck = await call('check_inbox', { chat_id: status.chat_id });
+check('delivered prompt is marked consumed and omitted from check_inbox', ackRes.status === 200 && afterAck.inbox.length === 0);
+extAc.abort();
 
 await phone.close();
 await call('send_status_update', { chat_id: status.chat_id, summary: 'Sent while phone offline', level: 'warning' });

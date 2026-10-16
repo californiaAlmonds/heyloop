@@ -60,21 +60,32 @@ function detectSource(clientName: string | undefined): ChatSource {
   return 'other';
 }
 
+const SESSION_ID_RE = /^[\w-]{1,128}$/;
+
 export function createMcpServer(store: Store, broker: ApprovalBroker): McpServer {
   const server = new McpServer({ name: 'heyloop', version: '0.0.0' }, { instructions: INSTRUCTIONS });
 
-  const resolveChat = (chatId: string | undefined, title: string | undefined, chatKey?: string) => {
+  const captureSession = (chatId: string, extra: Extra) => {
+    const raw = extra._meta?.['vscode.conversationId'];
+    if (typeof raw === 'string' && SESSION_ID_RE.test(raw) && store.getVscodeSession(chatId) !== raw) {
+      store.setVscodeSession(chatId, raw);
+    }
+  };
+
+  const resolveChat = (chatId: string | undefined, title: string | undefined, chatKey: string | undefined, extra: Extra) => {
+    let chat;
     if (chatId) {
-      const chat = store.getChat(chatId);
+      chat = store.getChat(chatId);
       if (!chat) throw new Error(`Unknown chat_id "${chatId}". Omit chat_id to start a new chat.`);
-      return chat;
+    } else if (chatKey) {
+      chat = store.getChatByKey(chatKey);
     }
-    if (chatKey) {
-      const existing = store.getChatByKey(chatKey);
-      if (existing) return existing;
+    if (!chat) {
+      const source = detectSource(server.server.getClientVersion()?.name);
+      chat = store.createChat(source, title?.trim() || 'Untitled task', chatKey);
     }
-    const source = detectSource(server.server.getClientVersion()?.name);
-    return store.createChat(source, title?.trim() || 'Untitled task', chatKey);
+    captureSession(chat.chat_id, extra);
+    return chat;
   };
 
   const elicitOnDesktop = async (req: ApprovalRequest, extra: Extra, signal: AbortSignal) => {
@@ -150,8 +161,8 @@ export function createMcpServer(store: Store, broker: ApprovalBroker): McpServer
       outputSchema: SendStatusUpdateOutput,
       annotations,
     },
-    async (args) => {
-      const chat = resolveChat(args.chat_id, args.title, args.chat_key);
+    async (args, extra) => {
+      const chat = resolveChat(args.chat_id, args.title, args.chat_key, extra);
       const notify = args.notify ?? ['success', 'warning', 'error'].includes(args.level);
       const env = store.append(chat.chat_id, 'agent', {
         kind: 'status',
@@ -176,9 +187,10 @@ export function createMcpServer(store: Store, broker: ApprovalBroker): McpServer
       outputSchema: CheckInboxOutput,
       annotations,
     },
-    async (args) => {
+    async (args, extra) => {
       const chat = args.chat_id ? store.getChat(args.chat_id) : args.chat_key ? store.getChatByKey(args.chat_key) : undefined;
       if (!chat) throw new Error('Unknown chat. Pass the chat_id or chat_key used in your earlier HeyLoop calls.');
+      captureSession(chat.chat_id, extra);
       return toolResult({ chat_id: chat.chat_id, inbox: store.takeInbox(chat.chat_id) });
     },
   );
@@ -202,7 +214,7 @@ export function createMcpServer(store: Store, broker: ApprovalBroker): McpServer
       if (onTimeout !== 'deny' && !options.some((o) => o.id === onTimeout)) {
         throw new Error('on_timeout must be "deny" or one of the option ids.');
       }
-      const chat = resolveChat(args.chat_id, args.title, args.chat_key);
+      const chat = resolveChat(args.chat_id, args.title, args.chat_key, extra);
       const req = broker.create(
         chat.chat_id,
         {
@@ -232,6 +244,8 @@ export function createMcpServer(store: Store, broker: ApprovalBroker): McpServer
     async (args, extra) => {
       const req = store.getApprovalRequest(args.request_id);
       if (!req) throw new Error(`Unknown request_id "${args.request_id}".`);
+      const rec = store.getApproval(args.request_id);
+      if (rec) captureSession(rec.chat_id, extra);
       return toolResult(await waitForAnswer(req, args.wait_seconds ?? DEFAULT_WAIT_SECONDS, extra));
     },
   );

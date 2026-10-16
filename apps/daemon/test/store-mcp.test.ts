@@ -62,6 +62,30 @@ describe('Store chat_key and migration', () => {
 
       // Duplicate non-null chat_key is rejected.
       assert.throws(() => store.createChat('vscode', 'Duplicate', 'ws:task-a'));
+
+      // vscode_session_id is migrated and starts undefined, then can be set and updated.
+      assert.equal(store.getVscodeSession('old-1'), undefined);
+      store.setVscodeSession('old-1', 'sess-1');
+      assert.equal(store.getVscodeSession('old-1'), 'sess-1');
+      store.setVscodeSession('old-1', 'sess-2');
+      assert.equal(store.getVscodeSession('old-1'), 'sess-2');
+
+      // markConsumed only marks unconsumed user text messages; hasMessage validates existence.
+      const agentMsg = store.append('old-1', 'agent', {
+        kind: 'status',
+        summary: 'hi',
+        level: 'info',
+        notify: false,
+      });
+      const userMsg = store.append('old-1', 'user', { kind: 'text', text: 'hello' });
+      assert.equal(store.hasMessage(agentMsg.id), true);
+      assert.equal(store.hasMessage(userMsg.id), true);
+      assert.equal(store.hasMessage('missing-msg'), false);
+      assert.equal(store.markConsumed('missing-msg'), false);
+      assert.equal(store.markConsumed(agentMsg.id), false);
+      assert.equal(store.markConsumed(userMsg.id), true);
+      assert.equal(store.markConsumed(userMsg.id), false);
+      assert.deepEqual(store.takeInbox('old-1'), []);
     }),
   );
 });
@@ -77,8 +101,8 @@ describe('MCP chat_key resolution and inbox delivery', () => {
       const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
       await Promise.all([mcp.connect(serverTransport), client.connect(clientTransport)]);
 
-      const call = async (name: string, args: Record<string, unknown>) =>
-        (await client.callTool({ name, arguments: args })).structuredContent as Record<string, any>;
+      const call = async (name: string, args: Record<string, unknown>, meta?: Record<string, unknown>) =>
+        (await client.callTool({ name, arguments: args, _meta: meta })).structuredContent as Record<string, any>;
 
       // Same chat_key twice -> same chat_id
       const r1 = await call('send_status_update', {
@@ -154,6 +178,46 @@ describe('MCP chat_key resolution and inbox delivery', () => {
         awaited.inbox.map((m: { text: string }) => m.text),
         ['msg before ask', 'msg before await'],
       );
+
+      // Captures _meta["vscode.conversationId"] on all four tools, updates when changed, ignores invalid values.
+      assert.equal(store.getVscodeSession(r1.chat_id), undefined);
+      await call(
+        'send_status_update',
+        { chat_id: r1.chat_id, summary: 'With session 1', level: 'info' },
+        { 'vscode.conversationId': 'dc621762-e451-4fab-ab81-c6be84cb738e' },
+      );
+      assert.equal(store.getVscodeSession(r1.chat_id), 'dc621762-e451-4fab-ab81-c6be84cb738e');
+
+      // Invalid session ids are ignored and do not overwrite existing session id.
+      await call(
+        'check_inbox',
+        { chat_id: r1.chat_id },
+        { 'vscode.conversationId': 'bad id with spaces!' },
+      );
+      await call(
+        'check_inbox',
+        { chat_id: r1.chat_id },
+        { 'vscode.conversationId': 'a'.repeat(129) },
+      );
+      assert.equal(store.getVscodeSession(r1.chat_id), 'dc621762-e451-4fab-ab81-c6be84cb738e');
+
+      // Later call with a different valid id updates it across check_inbox, ask_human_approval, and await_human_response.
+      await call('check_inbox', { chat_id: r1.chat_id }, { 'vscode.conversationId': 'session_2-abc' });
+      assert.equal(store.getVscodeSession(r1.chat_id), 'session_2-abc');
+
+      const ask2 = await call(
+        'ask_human_approval',
+        { chat_id: r1.chat_id, question: 'Deploy?', risk: 'low', input: 'confirm', wait_seconds: 0 },
+        { 'vscode.conversationId': 'session_3-def' },
+      );
+      assert.equal(store.getVscodeSession(r1.chat_id), 'session_3-def');
+
+      await call(
+        'await_human_response',
+        { request_id: ask2.request_id, wait_seconds: 0 },
+        { 'vscode.conversationId': 'session_4-ghi' },
+      );
+      assert.equal(store.getVscodeSession(r1.chat_id), 'session_4-ghi');
 
       await client.close();
     }),

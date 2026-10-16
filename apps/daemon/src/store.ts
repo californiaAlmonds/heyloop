@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS chats (
   status TEXT NOT NULL,
   last_heartbeat TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  chat_key TEXT
+  chat_key TEXT,
+  vscode_session_id TEXT
 );
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY,
@@ -130,6 +131,9 @@ export class Store extends EventEmitter<{ envelope: [Envelope]; chat: [Chat] }> 
     if (!cols.some((c) => c.name === 'chat_key')) {
       this.db.exec('ALTER TABLE chats ADD COLUMN chat_key TEXT;');
     }
+    if (!cols.some((c) => c.name === 'vscode_session_id')) {
+      this.db.exec('ALTER TABLE chats ADD COLUMN vscode_session_id TEXT;');
+    }
     this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS chats_chat_key ON chats (chat_key) WHERE chat_key IS NOT NULL;');
   }
 
@@ -186,6 +190,15 @@ export class Store extends EventEmitter<{ envelope: [Envelope]; chat: [Chat] }> 
     return changed;
   }
 
+  setVscodeSession(chatId: string, sessionId: string): void {
+    this.db.prepare('UPDATE chats SET vscode_session_id = ? WHERE chat_id = ?').run(sessionId, chatId);
+  }
+
+  getVscodeSession(chatId: string): string | undefined {
+    const row = this.db.prepare('SELECT vscode_session_id FROM chats WHERE chat_id = ?').get(chatId) as Row | undefined;
+    return opt<string>(row?.vscode_session_id);
+  }
+
   private emitChat(chatId: string): void {
     const chat = this.getChat(chatId);
     if (chat) this.emit('chat', chat);
@@ -230,6 +243,18 @@ export class Store extends EventEmitter<{ envelope: [Envelope]; chat: [Chat] }> 
       mark.run(r.id as string);
       return { id: r.id as string, ts: r.ts as string, text: (JSON.parse(r.body as string) as { text: string }).text };
     });
+  }
+
+  hasMessage(messageId: string): boolean {
+    return this.db.prepare('SELECT 1 FROM messages WHERE id = ?').get(messageId) !== undefined;
+  }
+
+  markConsumed(messageId: string): boolean {
+    return (
+      this.db
+        .prepare("UPDATE messages SET consumed = 1 WHERE id = ? AND sender = 'user' AND kind = 'text' AND consumed = 0")
+        .run(messageId).changes === 1
+    );
   }
 
   /** Records an inbound frame id; returns false if it was already processed. */
