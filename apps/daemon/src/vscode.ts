@@ -53,13 +53,20 @@ export function writeMcpJson(file: string, port: number): boolean {
   };
 
   let doc: { inputs?: { id: string }[]; servers?: Record<string, unknown> } = {};
+  const manual = (why: string) => {
+    console.log(`${file} ${why}. Add this manually:\n`);
+    console.log(JSON.stringify({ inputs: [input], servers: { heyloop: server } }, null, 2));
+    return false;
+  };
   if (existsSync(file)) {
     try {
       doc = JSON.parse(readFileSync(file, 'utf8'));
     } catch {
-      console.log(`${file} has comments or invalid JSON. Add this manually:\n`);
-      console.log(JSON.stringify({ inputs: [input], servers: { heyloop: server } }, null, 2));
-      return false;
+      return manual('has comments or invalid JSON');
+    }
+    const isObj = (v: unknown) => typeof v === 'object' && v !== null && !Array.isArray(v);
+    if (!isObj(doc) || (doc.inputs !== undefined && !Array.isArray(doc.inputs)) || (doc.servers !== undefined && !isObj(doc.servers))) {
+      return manual('has an unexpected shape');
     }
   }
   doc.inputs = [...(doc.inputs ?? []).filter((i) => i.id !== input.id), input];

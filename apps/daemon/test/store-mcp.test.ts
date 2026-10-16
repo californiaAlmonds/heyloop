@@ -126,7 +126,7 @@ describe('MCP chat_key resolution and inbox delivery', () => {
       assert.equal(byKey.chat_id, r3.chat_id);
       assert.equal(byKey.inbox[0].text, 'msg by key');
 
-      // ask_human_approval and await_human_response include inbox and consume once
+      // Pending results keep the inbox; it is delivered once with the final answer
       store.append(r1.chat_id, 'user', { kind: 'text', text: 'msg before ask' });
       const ask = await call('ask_human_approval', {
         chat_key: 'repo:feature-1',
@@ -136,8 +136,12 @@ describe('MCP chat_key resolution and inbox delivery', () => {
         wait_seconds: 0,
       });
       assert.equal(ask.chat_id, r1.chat_id);
-      assert.equal(ask.inbox.length, 1);
-      assert.equal(ask.inbox[0].text, 'msg before ask');
+      assert.equal(ask.status, 'pending');
+      assert.equal(ask.inbox, undefined);
+
+      const stillPending = await call('await_human_response', { request_id: ask.request_id, wait_seconds: 0 });
+      assert.equal(stillPending.status, 'pending');
+      assert.equal(stillPending.inbox, undefined);
 
       store.append(r1.chat_id, 'user', { kind: 'text', text: 'msg before await' });
       broker.answer(ask.request_id, { option_id: 'approve' }, 'phone');
@@ -146,8 +150,10 @@ describe('MCP chat_key resolution and inbox delivery', () => {
         wait_seconds: 0,
       });
       assert.equal(awaited.status, 'answered');
-      assert.equal(awaited.inbox.length, 1);
-      assert.equal(awaited.inbox[0].text, 'msg before await');
+      assert.deepEqual(
+        awaited.inbox.map((m: { text: string }) => m.text),
+        ['msg before ask', 'msg before await'],
+      );
 
       await client.close();
     }),

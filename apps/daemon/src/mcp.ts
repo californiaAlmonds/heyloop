@@ -134,7 +134,10 @@ export function createMcpServer(store: Store, broker: ApprovalBroker): McpServer
       extra.signal.removeEventListener('abort', abort);
     }
     const rec = store.getApproval(req.request_id)!;
-    return { ...broker.result(rec), inbox: store.takeInbox(rec.chat_id) };
+    const result = broker.result(rec);
+    // Messages are consumed on read, so only hand them over on a final, deliverable result.
+    if (result.status === 'pending' || extra.signal.aborted) return result;
+    return { ...result, inbox: store.takeInbox(rec.chat_id) };
   };
 
   server.registerTool(
@@ -168,7 +171,7 @@ export function createMcpServer(store: Store, broker: ApprovalBroker): McpServer
     {
       title: 'Check inbox',
       description:
-        'Return messages the user sent from their phone for this chat since the last check. Call at natural breakpoints between steps.',
+        'Return messages the user sent from their phone for this chat since the last check. Pass chat_id or chat_key (chat_id wins if both). Call at natural breakpoints between steps.',
       inputSchema: CheckInboxInput,
       outputSchema: CheckInboxOutput,
       annotations,

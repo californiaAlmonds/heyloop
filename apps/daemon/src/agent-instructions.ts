@@ -11,7 +11,7 @@ ${MANAGED_COMMENT}
 HeyLoop relays your status updates and approval requests to the owner's phone.
 
 ## Task status updates
-- At the start of a substantial task, call \`send_status_update\` with a short \`title\` and a stable \`chat_key\` formatted as \`"<workspace-folder-name>:<short-task-slug>"\`.
+- At the start of a substantial task, call \`send_status_update\` with a short \`title\` and a stable \`chat_key\` formatted as \`"<workspace-folder-slug>:<short-task-slug>"\` (lowercase, letters/digits/\`-\` only, e.g. \`my-project:fix-login\`).
 - Pass that exact \`chat_key\` on every later HeyLoop call in that task.
 - Post updates at milestones, on completion, on errors, and when blocked.
 - Keep summaries to one or two sentences, and send no more than about one update every few minutes unless important.
@@ -24,5 +24,5 @@ HeyLoop relays your status updates and approval requests to the owner's phone.
 ## Inbox & availability
 - Call \`check_inbox\` with the same \`chat_key\` at natural breakpoints to check for owner replies.
 - Any \`inbox\` messages in any tool result are instructions from the owner—follow them immediately.
-- If the HeyLoop tools are unavailable (daemon not running), continue normally and mention it once.
+- If the HeyLoop tools are unavailable (daemon not running), continue normally and mention it once, but do not take actions that need owner approval; ask in the chat instead.
 `;
