@@ -10,6 +10,7 @@ import type { Chat, Envelope } from '@heyloop/protocol';
 import type { ApprovalBroker } from './broker.js';
 import type { Config } from './config.js';
 import type { Store } from './store.js';
+import { WindowRegistry } from './windows.js';
 
 const PING_MS = 30_000;
 const MAX_BACKOFF_MS = 30_000;
@@ -33,10 +34,12 @@ export class RelayClient {
     private machine: { id: string; name: string },
     private store: Store,
     private broker: ApprovalBroker,
+    private windows: WindowRegistry = new WindowRegistry(),
   ) {
     this.keys = deriveKeys(relay.secret);
     store.on('envelope', (envelope) => this.sendFrame({ type: 'envelopes', envelopes: [envelope] }, pushHint(envelope)));
     store.on('chat', (chat) => this.sendFrame({ type: 'chats', machine: this.machine, chats: [chat] }));
+    windows.on('change', () => this.sendFrame({ type: 'workspaces', workspaces: this.windows.list() }));
   }
 
   start(): void {
@@ -110,7 +113,7 @@ export class RelayClient {
     }
   }
 
-  private handle(frame: PhoneFrame): void {
+  handle(frame: PhoneFrame): void {
     const reply = (ok: boolean, error?: string) => {
       this.store.saveResult(frame.id, ok, error);
       this.sendFrame({ type: 'result', ref: frame.id, ok, error });
@@ -118,6 +121,7 @@ export class RelayClient {
 
     switch (frame.type) {
       case 'sync': {
+        this.sendFrame({ type: 'workspaces', workspaces: this.windows.list() });
         const chats = this.store.listChats();
         for (const batch of batchChats(chats, this.machine)) {
           this.sendFrame({ type: 'chats', machine: this.machine, chats: batch });
@@ -146,6 +150,17 @@ export class RelayClient {
       case 'presence':
         // Consumed by desktop-first routing (not built yet).
         return reply(true);
+      case 'new_chat': {
+        if (!this.windows.has(frame.workspace_id)) return reply(false, 'window_offline');
+        const chatKey = `phone:${frame.id}`;
+        const firstLine = frame.text.split(/\r?\n/, 1)[0]?.trim() || 'New chat';
+        const title = firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine;
+        const chat = this.store.createChat('vscode', title, chatKey);
+        this.store.append(chat.chat_id, 'user', { kind: 'text', text: frame.text }, true);
+        const prompt = `${frame.text}\n\n---\nThis task was started from the HeyLoop phone app. Use chat_key "${chatKey}" on every HeyLoop call for this task so your updates reach the same phone chat.`;
+        this.windows.send(frame.workspace_id, { type: 'new_chat', chat_id: chat.chat_id, chat_key: chatKey, prompt });
+        return reply(true);
+      }
     }
   }
 

@@ -1,9 +1,32 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
-import type { Chat, Envelope } from '@heyloop/protocol';
-import { deriveKeys, newPairingSecret, seal } from '@heyloop/protocol/crypto';
-import { MAX_FRAME_CHARS } from '@heyloop/protocol/relay';
-import { batchChats, batchEnvelopes } from '../src/relay-client.js';
+import { ExtensionEvent, type Chat, type Envelope } from '@heyloop/protocol';
+import { deriveKeys, newPairingSecret, open, seal } from '@heyloop/protocol/crypto';
+import { DaemonFrame, MAX_FRAME_CHARS } from '@heyloop/protocol/relay';
+import { ApprovalBroker } from '../src/broker.js';
+import { RelayClient, batchChats, batchEnvelopes } from '../src/relay-client.js';
+import { startDaemon } from '../src/server.js';
+import { Store } from '../src/store.js';
+import { WindowRegistry } from '../src/windows.js';
+
+function withTempDir(fn: (dir: string) => Promise<void> | void) {
+  return async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'heyloop-test-'));
+    try {
+      await fn(dir);
+    } finally {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // SQLite WAL files on Windows may remain locked until process exit.
+      }
+    }
+  };
+}
 
 function makeEnvelope(seq: number, text = 'hello'): Envelope {
   return {
@@ -120,3 +143,200 @@ describe('batchChats', () => {
     }
   });
 });
+
+describe('WindowRegistry', () => {
+  it('tracks connected windows, emits change events, sends events, and replaces reconnecting ids', () => {
+    const registry = new WindowRegistry();
+    let changes = 0;
+    registry.on('change', () => changes++);
+
+    const events1: ExtensionEvent[] = [];
+    let closed1 = false;
+    const unregister1 = registry.register(
+      { id: 'win-1', name: 'heyloop' },
+      (ev) => events1.push(ev),
+      () => {
+        closed1 = true;
+      },
+    );
+    assert.equal(changes, 1);
+    assert.deepEqual(registry.list(), [{ id: 'win-1', name: 'heyloop' }]);
+
+    const event: ExtensionEvent = { type: 'new_chat', chat_id: 'c1', chat_key: 'phone:f1', prompt: 'hi' };
+    assert.equal(registry.send('win-1', event), true);
+    assert.equal(registry.send('missing', event), false);
+    assert.deepEqual(events1, [event]);
+
+    // Same id reconnects -> replaces old connection and closes it; stale unregister is a no-op.
+    const events2: ExtensionEvent[] = [];
+    const unregister2 = registry.register({ id: 'win-1', name: 'heyloop-renamed' }, (ev) => events2.push(ev));
+    assert.equal(closed1, true);
+    assert.equal(changes, 2);
+    unregister1();
+    assert.equal(changes, 2);
+    assert.deepEqual(registry.list(), [{ id: 'win-1', name: 'heyloop-renamed' }]);
+
+    assert.equal(registry.send('win-1', event), true);
+    assert.equal(events1.length, 1);
+    assert.deepEqual(events2, [event]);
+
+    unregister2();
+    assert.equal(changes, 3);
+    assert.deepEqual(registry.list(), []);
+    assert.equal(registry.send('win-1', event), false);
+  });
+});
+
+describe('RelayClient new_chat and workspaces', () => {
+  it(
+    'rejects offline windows with window_offline, creates chat with consumed initial text for connected window, and sends workspaces',
+    withTempDir((dir) => {
+      const secret = newPairingSecret();
+      const { key } = deriveKeys(secret);
+      const store = new Store(dir, 'machine-1');
+      const broker = new ApprovalBroker(store);
+      const windows = new WindowRegistry();
+      const client = new RelayClient(
+        { url: 'http://127.0.0.1:8787', secret },
+        { id: 'machine-1', name: 'desk' },
+        store,
+        broker,
+        windows,
+      );
+
+      // Attach a fake open WebSocket to inspect sent DaemonFrames.
+      const sentFrames: DaemonFrame[] = [];
+      (client as unknown as { ready: boolean; ws: { readyState: number; send: (raw: string) => void } }).ready = true;
+      (client as unknown as { ready: boolean; ws: { readyState: number; send: (raw: string) => void } }).ws = {
+        readyState: WebSocket.OPEN,
+        send: (raw: string) => {
+          const wire = JSON.parse(raw) as { t: string; data: string };
+          if (wire.t === 'send') sentFrames.push(DaemonFrame.parse(open(key, wire.data)));
+        },
+      };
+
+      // Offline window -> error 'window_offline' and no chat created.
+      client.handle({ type: 'new_chat', id: 'frame-offline', workspace_id: 'win-1', text: 'Fix bug' });
+      assert.deepEqual(store.getResult('frame-offline'), { ok: false, error: 'window_offline' });
+      assert.deepEqual(store.listChats(), []);
+
+      // Register window -> emits workspaces frame.
+      const extEvents: ExtensionEvent[] = [];
+      const unregister = windows.register({ id: 'win-1', name: 'heyloop' }, (ev) => extEvents.push(ev));
+      assert.deepEqual(sentFrames.at(-1), { type: 'workspaces', workspaces: [{ id: 'win-1', name: 'heyloop' }] });
+
+      // Connected window -> creates chat with chat_key, truncates title > 60 chars, appends consumed user text, emits prompt.
+      const firstLine = 'A'.repeat(65);
+      const fullText = `${firstLine}\nSecond line with details`;
+      client.handle({ type: 'new_chat', id: 'frame-ok', workspace_id: 'win-1', text: fullText });
+      assert.deepEqual(store.getResult('frame-ok'), { ok: true, error: undefined });
+
+      const chat = store.getChatByKey('phone:frame-ok');
+      assert.ok(chat);
+      assert.equal(chat.source, 'vscode');
+      assert.equal(chat.title, `${'A'.repeat(60)}…`);
+
+      // Initial text is stored as a user message for the phone chat, but already marked consumed for takeInbox.
+      const history = store.messagesSince(chat.chat_id, 0);
+      assert.equal(history.length, 1);
+      assert.equal(history[0]?.sender, 'user');
+      assert.deepEqual(history[0]?.body, { kind: 'text', text: fullText });
+      assert.deepEqual(store.takeInbox(chat.chat_id), []);
+
+      // Subsequent user say messages ARE returned by takeInbox.
+      client.handle({ type: 'say', id: 'frame-say', chat_id: chat.chat_id, text: 'follow-up from phone' });
+      const inbox = store.takeInbox(chat.chat_id);
+      assert.equal(inbox.length, 1);
+      assert.equal(inbox[0]?.text, 'follow-up from phone');
+
+      // Extension receives new_chat event with chat_id, chat_key, and prompt.
+      assert.equal(extEvents.length, 1);
+      assert.deepEqual(extEvents[0], {
+        type: 'new_chat',
+        chat_id: chat.chat_id,
+        chat_key: 'phone:frame-ok',
+        prompt: `${fullText}\n\n---\nThis task was started from the HeyLoop phone app. Use chat_key "phone:frame-ok" on every HeyLoop call for this task so your updates reach the same phone chat.`,
+      });
+
+      // sync also sends workspaces.
+      sentFrames.length = 0;
+      client.handle({ type: 'sync', id: 'frame-sync', cursors: {} });
+      assert.deepEqual(sentFrames[0], { type: 'workspaces', workspaces: [{ id: 'win-1', name: 'heyloop' }] });
+
+      unregister();
+      assert.deepEqual(sentFrames.at(-1), { type: 'workspaces', workspaces: [] });
+    }),
+  );
+});
+
+describe('GET /api/windows/events SSE route', () => {
+  it(
+    'validates auth and Workspace schema, streams ExtensionEvents over SSE, and unregisters on close',
+    withTempDir(async (dir) => {
+      const prevHome = process.env.HEYLOOP_HOME;
+      process.env.HEYLOOP_HOME = dir;
+      const windows = new WindowRegistry();
+      const server = startDaemon(
+        { port: 0, token: 'test-secret-token', machine_id: 'm1', machine_name: 'desk' },
+        windows,
+      );
+      try {
+        await new Promise<void>((resolve) => server.once('listening', resolve));
+        const { port } = server.address() as AddressInfo;
+        server.closeAllConnections();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+
+        const srv = startDaemon(
+          { port, token: 'test-secret-token', machine_id: 'm1', machine_name: 'desk' },
+          windows,
+        );
+        try {
+          await new Promise<void>((resolve) => srv.once('listening', resolve));
+          const base = `http://127.0.0.1:${port}`;
+          const headers = { Authorization: 'Bearer test-secret-token' };
+
+          const unauth = await fetch(`${base}/api/windows/events?id=w1&name=proj`);
+          assert.equal(unauth.status, 403);
+
+          const badParams = await fetch(`${base}/api/windows/events?id=&name=proj`, { headers });
+          assert.equal(badParams.status, 400);
+
+          const ac = new AbortController();
+          const res = await fetch(`${base}/api/windows/events?id=w1&name=proj`, { headers, signal: ac.signal });
+          assert.equal(res.status, 200);
+          assert.equal(res.headers.get('content-type'), 'text/event-stream');
+          assert.deepEqual(windows.list(), [{ id: 'w1', name: 'proj' }]);
+
+          const sent = windows.send('w1', {
+            type: 'new_chat',
+            chat_id: 'c1',
+            chat_key: 'phone:1',
+            prompt: 'hello world',
+          });
+          assert.equal(sent, true);
+
+          const reader = res.body!.getReader();
+          const { value } = await reader.read();
+          const chunk = new TextDecoder().decode(value);
+          assert.equal(
+            chunk,
+            `data: ${JSON.stringify({ type: 'new_chat', chat_id: 'c1', chat_key: 'phone:1', prompt: 'hello world' })}\n\n`,
+          );
+
+          ac.abort();
+          for (let i = 0; i < 20 && windows.list().length > 0; i++) {
+            await new Promise((r) => setTimeout(r, 20));
+          }
+          assert.deepEqual(windows.list(), []);
+        } finally {
+          srv.closeAllConnections();
+          await new Promise<void>((resolve) => srv.close(() => resolve()));
+        }
+      } finally {
+        if (prevHome === undefined) delete process.env.HEYLOOP_HOME;
+        else process.env.HEYLOOP_HOME = prevHome;
+      }
+    }),
+  );
+});
+
