@@ -5,6 +5,7 @@
 - `packages/protocol/src/` — zod contracts: `index.ts` (envelopes, MCP tools), `relay.ts` (relay/app frames), `crypto.ts` (pairing, secretbox). Change here first.
 - `apps/daemon/src/` — `mcp.ts` tools, `broker.ts` approvals, `store.ts` SQLite, `server.ts` HTTP/REST, `relay-client.ts`, `cli.ts`, `config.ts`, `vscode.ts` (VS Code setup), `autostart.ts`, `agent-instructions.ts`; `bin/heyloop.mjs` global command; `scripts/` smoke tests; `test/` unit tests (`npm test -w @heyloop/daemon`).
 - `apps/relay/src/index.ts` — Worker + per-room Durable Object; forwards/queues ciphertext only.
+- `apps/vscode/` — VS Code extension `heyloop-vscode` (esbuild bundle, `npm run package -w heyloop-vscode` → `heyloop.vsix`, install with `code --install-extension`): receives phone-started chats over the daemon SSE stream.
 - `apps/mobile/src/` — `app/` routes (`pair`, `index` chat list, `chat/[id]`), `lib/client.ts` relay client, `polyfills.ts` PRNG seed.
 - `docs/context/` — `state.md` (read first), `architecture.md`, `decisions.md`; `docs/site/` static website (GitHub Pages).
 - `.github/agents/` — Scout (Haiku), Verifier (Sonnet), Reviewer (GPT) subagents. Worktrees for coder tasks live in `E:\heyloop-wt\<slug>` (outside the repo).

@@ -20,7 +20,7 @@ flowchart LR
 | `apps/relay` | done (local) | Pairing rooms, encrypted message queue; later push fan-out and remote MCP endpoint (claude.ai/ChatGPT) |
 | `apps/mobile` | in progress | Pairing, chat list, read-only conversation done; next approvals/reply/rename, cache, notifications, terminal view |
 | `docs/site` | static website | Product page and quick start; GitHub Pages Actions deploys this directory only |
-| VS Code extension | phase 2 | Start chats from phone, window-focus presence |
+| `apps/vscode` (VS Code extension `heyloop-vscode`) | done (local .vsix) | Holds an SSE stream to the daemon per window (`GET /api/windows/events`); on `new_chat` opens a fresh Copilot chat in Agent mode and auto-submits the prompt. Later: window-focus presence |
 
 ## Data model
 - **Chat**: `chat_id`, `source`, `title` (+`title_locked` after user rename), `status` = running | waiting_input | idle | stopped | error.
@@ -36,8 +36,8 @@ Contracts: [packages/protocol/src/relay.ts](../../packages/protocol/src/relay.ts
 - `{t:'send', data}` → relay stores for the other role and forwards as `{t:'msg', id, data}`; receiver replies `{t:'ack', id}` to delete.
 - `data` = base64url(nonce ‖ secretbox(JSON app frame)).
 - Liveness: clients send string `ping` every 30s (runtime auto-replies `pong`). A 30s alarm closes sockets silent >75s and broadcasts `peer {online:false}`.
-- Daemon → phone: `chats` (upsert list + machine), `envelopes` (batch), `result` (ref to phone frame id).
-- Phone → daemon: `sync` (per-chat cursors), `answer`, `say`, `rename`, `presence`; each has a ULID `id` for dedupe.
+- Daemon → phone: `chats` (upsert list + machine), `envelopes` (batch), `result` (ref to phone frame id), `workspaces` (connected VS Code windows; on sync and on change).
+- Phone → daemon: `sync` (per-chat cursors), `answer`, `say`, `rename`, `presence`, `new_chat` (workspace_id + text; daemon creates chat with `chat_key` `phone:<id>`, stores the text as an already-consumed user message, and sends the extension a prompt that tells the agent to use that chat_key); each has a ULID `id` for dedupe.
 
 ## Routing (target, needs relay)
 1. Away toggle on, screen locked, or idle >2 min → phone immediately.

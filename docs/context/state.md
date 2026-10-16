@@ -44,7 +44,7 @@ Phase 1 (MVP): daemon **done** · relay **done (local)** · Android app **in pro
 
 ## Next
 1. Live loop verified 2026-10-16: a Copilot chat in VS Code posted a status and an approval through the deployed relay; the owner answered on the phone (dev APK + Metro LAN). Still to confirm: push doorbell with the app backgrounded/closed.
-2. Start a conversation from the phone (owner wants this later): needs a VS Code extension that receives a phone "new task" frame via the daemon and opens a Copilot chat with that prompt (architecture.md phase 2). Plan + owner approval first.
+2. Phone-started chats built 2026-10-16 (daemon window registry + SSE, `apps/vscode` extension installed from `apps/vscode/heyloop.vsix`, phone "New chat" screen with window picker; smoke:relay 12/12). Needs an on-device test: New chat → pick window → prompt starts a Copilot agent chat that reports into the same phone chat. VS Code tool confirmations still block unattended runs.
 3. Presence + 30s desktop-first routing gate and stall nudge.
 4. Cache limits: no pruning and only the newest 300 envelopes per chat are loaded (no lazy older history yet).
 5. Mobile `sync` cursors frame is unbatched (fine below ~10k chats; revisit only if chat counts grow).
