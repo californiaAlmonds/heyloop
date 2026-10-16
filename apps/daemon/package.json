@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "license": "MIT",
+  "bin": {
+    "heyloop": "bin/heyloop.mjs"
+  },
   "scripts": {
     "dev": "tsx watch src/cli.ts start",
     "cli": "tsx src/cli.ts",
