@@ -9,6 +9,7 @@
     "cli": "tsx src/cli.ts",
     "smoke": "tsx scripts/smoke.ts",
     "smoke:relay": "tsx scripts/relay-smoke.ts",
+    "test": "node --import tsx --test test/*.test.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
