@@ -3,7 +3,7 @@
 - **Stack:** npm workspaces, TypeScript strict ESM (NodeNext), Node 22.13+ (`node:sqlite`), zod v4, `@modelcontextprotocol/sdk` 1.31, tweetnacl; relay = Cloudflare Worker + Durable Object (wrangler 4); mobile = Expo SDK 57, Expo Router, React 19.2.3, RN 0.86.
 - **Commands:** `npm install` · `npm run typecheck` (no lint) · daemon `npm run cli -w @heyloop/daemon -- start` (127.0.0.1:4519/mcp) · `npm run smoke -w @heyloop/daemon` · relay `npm run dev -w @heyloop/relay` (port 8787) + `npm run smoke:relay -w @heyloop/daemon` · mobile `npx expo start` / `npx expo export --platform android` from `apps/mobile`. No build step; TS runs via `tsx`.
 - `packages/protocol/src/` — zod contracts: `index.ts` (envelopes, MCP tools), `relay.ts` (relay/app frames), `crypto.ts` (pairing, secretbox). Change here first.
-- `apps/daemon/src/` — `mcp.ts` tools, `broker.ts` approvals, `store.ts` SQLite, `server.ts` HTTP/REST, `relay-client.ts`, `cli.ts`, `config.ts`; `scripts/` smoke tests.
+- `apps/daemon/src/` — `mcp.ts` tools, `broker.ts` approvals, `store.ts` SQLite, `server.ts` HTTP/REST, `relay-client.ts`, `cli.ts`, `config.ts`, `vscode.ts` (VS Code setup), `autostart.ts`, `agent-instructions.ts`; `bin/heyloop.mjs` global command; `scripts/` smoke tests; `test/` unit tests (`npm test -w @heyloop/daemon`).
 - `apps/relay/src/index.ts` — Worker + per-room Durable Object; forwards/queues ciphertext only.
 - `apps/mobile/src/` — `app/` routes (`pair`, `index` chat list, `chat/[id]`), `lib/client.ts` relay client, `polyfills.ts` PRNG seed.
 - `docs/context/` — `state.md` (read first), `architecture.md`, `decisions.md`; `docs/site/` static website (GitHub Pages).
@@ -89,7 +89,11 @@ If you are running as the Scout, Verifier, or Reviewer subagent, ignore this sec
 ## Context discipline (keep chats long-lived)
 - Search before reading: use grep or file search, then read only the matching line ranges. Never read `package-lock.json`, `node_modules/`, `dist/`, `.wrangler/`, `.expo/`, `.credentials/`, or `.playwright-mcp/`.
 - Keep terminal output small. Chain commands into one call and trim output, for example `npm run typecheck 2>&1 | Select-Object -Last 40` or `npm run smoke -w @heyloop/daemon 2>&1 | Select-Object -Last 20`. Never dump full logs, JSON payloads, or HTML.
-- For browser checks, prefer an accessibility snapshot of a specific element over full-page snapshots or screenshots. Close tabs you no longer need.
+- For browser checks (the `docs/site` website, the GitHub repo and Actions, the Expo or EAS dashboards, the Cloudflare dashboard):
+  - Use the `playwright-brave` MCP: `browser_navigate`, then `browser_snapshot`, then `browser_click`/`browser_type`.
+  - Prefer an accessibility snapshot of a specific element over full-page snapshots or screenshots. Close tabs you no longer need.
+  - It drives the owner's real Brave profile, with signed-in accounts. Stay on the pages the task needs, and never submit forms, sign in, change settings, or trigger builds or deploys from the browser without owner approval.
+- The mobile app runs on a real phone, not in a browser. Phone checks are done by the owner, or with `adb` over USB as described in AGENTS.md.
 - Use the todo list for multi-step work, so the plan survives compaction.
 - Durable facts you had to discover the hard way (gotchas, commands, decisions) go in `/memories/repo/` as one-line bullets. Check there before re-investigating. If a fact changes the project map above, update the map instead.
 - At the start of a task, if `/memories/repo/progress.md` exists and relates to the task, read it and continue from it.

@@ -31,6 +31,8 @@ Phase 1 (MVP): daemon **done** · relay **done (local)** · Android app **in pro
 - Relay liveness: sockets silent >75s are closed by a 30s alarm sweep and the peer is told `online:false` (verified with a silent fake daemon: offline at ~90s).
 - Frame limits: `MAX_FRAME_CHARS` (512 KiB) shared from `@heyloop/protocol/relay`; relay rejects `send.data` that isn't base64url ciphertext (min nonce+MAC, max frame); daemon sync batches envelopes and chats by size (≤100 envelopes/batch); `open()` returns undefined on malformed input and the daemon ignores non-JSON relay frames. README has a "Self-hosting the relay" guide.
 - Unit tests: `npm test -w @heyloop/daemon` (node:test via tsx, `apps/daemon/test/`), also run in CI.
+- Real VS Code use (Phase A, 2026-10-16): global `heyloop` bin (`apps/daemon/bin/heyloop.mjs`, tsx loader); `heyloop setup vscode --user` writes the user-level VS Code `mcp.json` (token stays a promptString input) and a managed `prompts/heyloop.instructions.md` telling every agent when to post, ask approval and check inbox; `heyloop autostart install|uninstall|status` (Windows Startup `.cmd` → PowerShell `-EncodedCommand`, hidden, logs to `~/.heyloop/daemon.log`; verified by running it); `heyloop status`. MCP: optional `chat_key` reuses one chat across sessions; `check_inbox` by chat_id/chat_key; approval tools return `inbox` only with final results.
+- Phase B prep: existing EAS development APK (2026-10-14, profile development) is still valid — no native config changed since; `eas` and `wrangler` are logged in; relay deploy dry-run OK. Real `~/.heyloop` is not paired yet.
 - Dev workflow: Opus lead + Gemini 4 Argon coders via the user-level `gemini-worker` MCP (Vertex), parallel worktrees in `E:\heyloop-wt\`; see `.github/copilot-instructions.md`.
 - Verified: workspace typecheck, `expo-doctor` 21/21, `expo export --platform android`, `smoke:relay` 7/7.
 - GitHub repo `californiaAlmonds/heyloop` is public; four existing commits pushed unchanged, `origin/main` configured.
@@ -41,10 +43,11 @@ Phase 1 (MVP): daemon **done** · relay **done (local)** · Android app **in pro
 - Verification: workspace typecheck passes; website anchors, image loading, copy/FAQ controls, and overflow/phone spacing checks pass at 320/390/768/1440px.
 
 ## Next
-1. Install the EAS development build on the phone, pair against the deployed relay, and verify a real doorbell push (app backgrounded, approval from the daemon).
+1. Phase B (needs owner): redeploy relay; install dev APK + Metro; `heyloop pair --relay <deployed>`; `npm link -w @heyloop/daemon`; `heyloop autostart install`; `heyloop setup vscode --user`; verify a real push and an approval answered from the phone in a live Copilot chat.
 2. Presence + 30s desktop-first routing gate and stall nudge; deploy docs (README) for self-hosters.
 3. Cache limits: no pruning and only the newest 300 envelopes per chat are loaded (no lazy older history yet).
 4. Mobile `sync` cursors frame is unbatched (fine below ~10k chats; revisit only if chat counts grow).
+5. `smoke:relay` "offline messages are queued and delivered" failed once in 4 runs (timing flake); `daemon.log` has no rotation.
 
 ## Open items
 - `LICENSE` file — needs copyright holder name (package.json says MIT).
