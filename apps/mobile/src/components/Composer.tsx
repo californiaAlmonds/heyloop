@@ -1,6 +1,6 @@
 import { useTheme } from 'expo-router';
-import { useState } from 'react';
-import { KeyboardAvoidingView, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Keyboard, KeyboardAvoidingView, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useHeyLoop } from '@/lib/client';
 import { useAction } from '@/lib/use-action';
@@ -13,6 +13,15 @@ export function Composer({ chatId }: { chatId: string }) {
   const snap = useHeyLoop();
   const { busy, error, run } = useAction();
   const [text, setText] = useState('');
+  const [keyboardOpen, setKeyboardOpen] = useState(Keyboard.isVisible());
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardOpen(true));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardOpen(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
   const body = text.trim();
   const online = snap.status === 'online';
 
@@ -22,7 +31,7 @@ export function Composer({ chatId }: { chatId: string }) {
   };
 
   return (
-    <View style={[styles.wrap, { borderColor: colors.border, paddingBottom: 8 + insets.bottom }]}>
+    <View style={[styles.wrap, { borderColor: colors.border, paddingBottom: 8 + (keyboardOpen ? 0 : insets.bottom) }]}>
       {online && !snap.computerOnline && (
         <Text style={[styles.hint, { color: colors.text }]}>Computer offline. Messages are delivered when it reconnects.</Text>
       )}

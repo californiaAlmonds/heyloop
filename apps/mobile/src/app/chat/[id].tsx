@@ -1,5 +1,6 @@
 import type { Envelope, MessageBody } from '@heyloop/protocol';
 import { Stack, useLocalSearchParams, useTheme } from 'expo-router';
+import { useHeaderHeight } from 'expo-router/react-navigation';
 import { useEffect, useRef, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { ApprovalActions } from '@/components/ApprovalActions';
@@ -23,6 +24,7 @@ export default function Conversation() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const snap = useHeyLoop();
   const { colors } = useTheme();
+  const headerHeight = useHeaderHeight();
   const chat = snap.chats.find((c) => c.chat_id === id);
   const envelopes = snap.messages[id] ?? [];
   const pending = new Set(pendingApprovals(envelopes).map((r) => r.request_id));
@@ -46,7 +48,7 @@ export default function Conversation() {
   };
 
   return (
-    <KeyboardAvoidingView behavior="padding" style={styles.fill}>
+    <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={headerHeight} style={styles.fill}>
       <Stack.Screen
         options={{
           title: chat?.title ?? 'Chat',
