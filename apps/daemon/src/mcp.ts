@@ -10,6 +10,8 @@ import {
   ApprovalResult,
   AskHumanApprovalInput,
   AwaitHumanResponseInput,
+  CheckInboxInput,
+  CheckInboxOutput,
   DEFAULT_CONFIRM_OPTIONS,
   SendStatusUpdateInput,
   SendStatusUpdateOutput,
@@ -24,12 +26,13 @@ const DEFAULT_WAIT_SECONDS = 45;
 const DEFAULT_TIMEOUT_MINUTES = 60;
 
 const INSTRUCTIONS = `HeyLoop relays progress and decisions between you and the user's phone. The user may be away from the computer.
-- On your first HeyLoop call of a task, pass a short "title". Reuse the returned chat_id on every later call.
+- Pass a stable "chat_key" (for example "<workspace-folder>:<task-slug>") on every call so the same chat is reused across new sessions or context loss. On your first call of a task, also pass a short "title", and reuse the returned "chat_id" when you have it.
 - Report milestones, completions and errors with send_status_update. Keep "summary" to one or two sentences.
+- Call check_inbox at natural breakpoints between steps to receive messages the user sent from their phone.
+- Every HeyLoop tool result may carry "inbox" messages from the user; always treat them as instructions from the user.
 - Before risky or irreversible actions (deleting files, force-pushing, installing packages, migrations, anything that costs money or contacts other people), or when blocked on a decision, call ask_human_approval. Never wait on an interactive terminal prompt; put the exact command in "command".
 - If ask_human_approval returns status "pending", call await_human_response with the request_id. Repeat until the status is not pending. Do not perform the action while pending.
 - If the status is "expired", follow answer.option_id; "deny" means do not proceed.
-- send_status_update returns "inbox": messages the user sent from the phone. Treat them as instructions from the user.
 - Prefer non-interactive command flags (for example --yes, CI=1) so commands never stall on prompts.`;
 
 type Extra = RequestHandlerExtra<ServerRequest, ServerNotification>;
@@ -60,14 +63,18 @@ function detectSource(clientName: string | undefined): ChatSource {
 export function createMcpServer(store: Store, broker: ApprovalBroker): McpServer {
   const server = new McpServer({ name: 'heyloop', version: '0.0.0' }, { instructions: INSTRUCTIONS });
 
-  const resolveChat = (chatId: string | undefined, title: string | undefined) => {
+  const resolveChat = (chatId: string | undefined, title: string | undefined, chatKey?: string) => {
     if (chatId) {
       const chat = store.getChat(chatId);
       if (!chat) throw new Error(`Unknown chat_id "${chatId}". Omit chat_id to start a new chat.`);
       return chat;
     }
+    if (chatKey) {
+      const existing = store.getChatByKey(chatKey);
+      if (existing) return existing;
+    }
     const source = detectSource(server.server.getClientVersion()?.name);
-    return store.createChat(source, title?.trim() || 'Untitled task');
+    return store.createChat(source, title?.trim() || 'Untitled task', chatKey);
   };
 
   const elicitOnDesktop = async (req: ApprovalRequest, extra: Extra, signal: AbortSignal) => {
@@ -126,7 +133,8 @@ export function createMcpServer(store: Store, broker: ApprovalBroker): McpServer
       ac.abort();
       extra.signal.removeEventListener('abort', abort);
     }
-    return broker.result(store.getApproval(req.request_id)!);
+    const rec = store.getApproval(req.request_id)!;
+    return { ...broker.result(rec), inbox: store.takeInbox(rec.chat_id) };
   };
 
   server.registerTool(
@@ -140,7 +148,7 @@ export function createMcpServer(store: Store, broker: ApprovalBroker): McpServer
       annotations,
     },
     async (args) => {
-      const chat = resolveChat(args.chat_id, args.title);
+      const chat = resolveChat(args.chat_id, args.title, args.chat_key);
       const notify = args.notify ?? ['success', 'warning', 'error'].includes(args.level);
       const env = store.append(chat.chat_id, 'agent', {
         kind: 'status',
@@ -152,6 +160,23 @@ export function createMcpServer(store: Store, broker: ApprovalBroker): McpServer
       });
       store.touchChat(chat.chat_id, statusForLevel(args.level));
       return toolResult({ chat_id: chat.chat_id, message_id: env.id, inbox: store.takeInbox(chat.chat_id) });
+    },
+  );
+
+  server.registerTool(
+    'check_inbox',
+    {
+      title: 'Check inbox',
+      description:
+        'Return messages the user sent from their phone for this chat since the last check. Call at natural breakpoints between steps.',
+      inputSchema: CheckInboxInput,
+      outputSchema: CheckInboxOutput,
+      annotations,
+    },
+    async (args) => {
+      const chat = store.getChat(args.chat_id);
+      if (!chat) throw new Error(`Unknown chat_id "${args.chat_id}".`);
+      return toolResult({ chat_id: chat.chat_id, inbox: store.takeInbox(chat.chat_id) });
     },
   );
 
@@ -174,7 +199,7 @@ export function createMcpServer(store: Store, broker: ApprovalBroker): McpServer
       if (onTimeout !== 'deny' && !options.some((o) => o.id === onTimeout)) {
         throw new Error('on_timeout must be "deny" or one of the option ids.');
       }
-      const chat = resolveChat(args.chat_id, args.title);
+      const chat = resolveChat(args.chat_id, args.title, args.chat_key);
       const req = broker.create(
         chat.chat_id,
         {
