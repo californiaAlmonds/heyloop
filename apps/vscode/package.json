@@ -1,0 +1,46 @@
+{
+  "name": "heyloop-vscode",
+  "displayName": "HeyLoop",
+  "description": "Start Copilot chats in this VS Code window from your phone via HeyLoop.",
+  "publisher": "heyloop",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/californiaAlmonds/heyloop.git",
+    "directory": "apps/vscode"
+  },
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "heyloop.reconnect",
+        "title": "HeyLoop: Reconnect"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --platform=node --format=cjs --external:vscode",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "package": "npm run build && vsce package --no-dependencies -o heyloop.vsix"
+  },
+  "dependencies": {
+    "@heyloop/protocol": "*",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.100.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}
