@@ -6,7 +6,7 @@ import {
   type DaemonFrame,
   type PushHint,
 } from '@heyloop/protocol/relay';
-import type { Envelope } from '@heyloop/protocol';
+import type { Chat, Envelope } from '@heyloop/protocol';
 import type { ApprovalBroker } from './broker.js';
 import type { Config } from './config.js';
 import type { Store } from './store.js';
@@ -77,7 +77,13 @@ export class RelayClient {
 
   private onMessage(raw: string): void {
     if (raw === 'pong') return;
-    const parsed = RelayServerFrame.safeParse(JSON.parse(raw));
+    let json: unknown;
+    try {
+      json = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    const parsed = RelayServerFrame.safeParse(json);
     if (!parsed.success) return;
     const frame = parsed.data;
 
@@ -89,7 +95,13 @@ export class RelayClient {
     } else if (frame.t === 'peer') {
       this.phoneOnline = frame.online;
     } else if (frame.t === 'msg') {
-      const decoded = PhoneFrame.safeParse(open(this.keys.key, frame.data));
+      let plain: unknown;
+      try {
+        plain = open(this.keys.key, frame.data);
+      } catch {
+        plain = undefined;
+      }
+      const decoded = PhoneFrame.safeParse(plain);
       if (decoded.success) {
         if (this.store.markProcessed(decoded.data.id)) this.handle(decoded.data);
         else this.replyResult(decoded.data.id); // Phone re-sent an unconfirmed frame.
@@ -107,7 +119,9 @@ export class RelayClient {
     switch (frame.type) {
       case 'sync': {
         const chats = this.store.listChats();
-        this.sendFrame({ type: 'chats', machine: this.machine, chats });
+        for (const batch of batchChats(chats, this.machine)) {
+          this.sendFrame({ type: 'chats', machine: this.machine, chats: batch });
+        }
         for (const chat of chats) {
           const envelopes = this.store.messagesSince(chat.chat_id, frame.cursors[chat.chat_id] ?? 0);
           for (const batch of batchEnvelopes(envelopes)) {
@@ -144,6 +158,27 @@ export class RelayClient {
     if (!this.ready || this.ws?.readyState !== WebSocket.OPEN) return;
     this.ws.send(JSON.stringify({ t: 'send', data: seal(this.keys.key, frame), push }));
   }
+}
+
+export function batchChats(chats: Chat[], machine: { id: string; name: string } = { id: '', name: '' }): Chat[][] {
+  const overhead = Buffer.byteLength(JSON.stringify({ type: 'chats', machine, chats: [] }));
+  const batches: Chat[][] = [];
+  let batch: Chat[] = [];
+  let bytes = overhead;
+  for (const chat of chats) {
+    const chatBytes = Buffer.byteLength(JSON.stringify(chat));
+    const added = batch.length === 0 ? chatBytes : 1 + chatBytes;
+    if (batch.length > 0 && bytes + added > SYNC_MAX_BYTES) {
+      batches.push(batch);
+      batch = [chat];
+      bytes = overhead + chatBytes;
+    } else {
+      batch.push(chat);
+      bytes += added;
+    }
+  }
+  if (batch.length > 0) batches.push(batch);
+  return batches;
 }
 
 export function batchEnvelopes(envelopes: Envelope[]): Envelope[][] {

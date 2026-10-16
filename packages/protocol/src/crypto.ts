@@ -60,10 +60,15 @@ export function seal(key: Uint8Array, value: unknown): string {
 
 /** Returns undefined if the ciphertext was tampered with or uses another key. */
 export function open(key: Uint8Array, data: string): unknown {
-  const bytes = fromBase64Url(data);
-  const nonce = bytes.subarray(0, nacl.secretbox.nonceLength);
-  const plain = nacl.secretbox.open(bytes.subarray(nacl.secretbox.nonceLength), nonce, key);
-  return plain ? JSON.parse(decoder.decode(plain)) : undefined;
+  try {
+    const bytes = fromBase64Url(data);
+    if (bytes.length < nacl.secretbox.nonceLength + nacl.secretbox.overheadLength) return undefined;
+    const nonce = bytes.subarray(0, nacl.secretbox.nonceLength);
+    const plain = nacl.secretbox.open(bytes.subarray(nacl.secretbox.nonceLength), nonce, key);
+    return plain ? JSON.parse(decoder.decode(plain)) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export interface PairingLink {
