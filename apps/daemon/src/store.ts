@@ -191,14 +191,14 @@ export class Store extends EventEmitter<{ envelope: [Envelope]; chat: [Chat] }> 
     if (chat) this.emit('chat', chat);
   }
 
-  append(chatId: string, sender: Sender, body: MessageBody): Envelope {
+  append(chatId: string, sender: Sender, body: MessageBody, consumed = false): Envelope {
     const { seq } = this.db
       .prepare('SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM messages WHERE chat_id = ?')
       .get(chatId) as { seq: number };
     const env: Envelope = { v: PROTOCOL_VERSION, id: ulid(), chat_id: chatId, seq, ts: now(), sender, body };
     this.db
-      .prepare('INSERT INTO messages (id, chat_id, seq, ts, sender, kind, body) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(env.id, chatId, seq, env.ts, sender, body.kind, JSON.stringify(body));
+      .prepare('INSERT INTO messages (id, chat_id, seq, ts, sender, kind, body, consumed) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(env.id, chatId, seq, env.ts, sender, body.kind, JSON.stringify(body), consumed ? 1 : 0);
     this.emit('envelope', env);
     return env;
   }

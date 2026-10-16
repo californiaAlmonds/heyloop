@@ -2,6 +2,7 @@
 // Needs: relay (`npm run dev -w @heyloop/relay`), `heyloop pair --relay http://127.0.0.1:8787`, daemon running.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { ExtensionEvent } from '@heyloop/protocol';
 import { deriveKeys, open, seal } from '@heyloop/protocol/crypto';
 import { DaemonFrame, type PhoneFrame } from '@heyloop/protocol/relay';
 import { ulid } from 'ulid';
@@ -127,6 +128,55 @@ check(
 );
 const withInbox = await call('send_status_update', { chat_id: status.chat_id, summary: 'Migrated', level: 'success' });
 check('phone message reaches inbox exactly once', withInbox.inbox.length === 1);
+
+const offlineChatId = ulid();
+phone.send({ type: 'new_chat', id: offlineChatId, workspace_id: 'unknown-window', text: 'Start task on missing window' });
+const offlineResult = await phone.waitFor((f) => f.type === 'result' && f.ref === offlineChatId);
+check(
+  'new_chat with unknown window returns window_offline',
+  offlineResult.type === 'result' && !offlineResult.ok && offlineResult.error === 'window_offline',
+);
+
+const extAc = new AbortController();
+const winId = `win-${ulid()}`;
+const extRes = await fetch(
+  `http://127.0.0.1:${config.port}/api/windows/events?id=${encodeURIComponent(winId)}&name=smoke-workspace`,
+  { headers: { Authorization: `Bearer ${config.token}` }, signal: extAc.signal },
+);
+const workspacesFrame = await phone.waitFor(
+  (f) => f.type === 'workspaces' && f.workspaces.some((w) => w.id === winId && w.name === 'smoke-workspace'),
+);
+check('phone receives workspaces frame listing connected window', workspacesFrame.type === 'workspaces');
+
+const newChatId = ulid();
+phone.send({ type: 'new_chat', id: newChatId, workspace_id: winId, text: 'Build new feature from phone' });
+const newChatResult = await phone.waitFor((f) => f.type === 'result' && f.ref === newChatId);
+
+const reader = extRes.body!.getReader();
+const decoder = new TextDecoder();
+let sseBuf = '';
+let extEvent: ExtensionEvent | undefined;
+while (!extEvent) {
+  const { value, done } = await reader.read();
+  if (done) break;
+  sseBuf += decoder.decode(value, { stream: true });
+  for (const block of sseBuf.split('\n\n')) {
+    const dataLine = block.split('\n').find((line) => line.startsWith('data: '));
+    if (dataLine) {
+      extEvent = ExtensionEvent.parse(JSON.parse(dataLine.slice(6)));
+      break;
+    }
+  }
+}
+extAc.abort();
+check(
+  'new_chat succeeds and emits extension event with chat_key in prompt',
+  newChatResult.type === 'result' &&
+    newChatResult.ok &&
+    extEvent?.type === 'new_chat' &&
+    extEvent.chat_key === `phone:${newChatId}` &&
+    extEvent.prompt.includes(`phone:${newChatId}`),
+);
 
 await phone.close();
 await call('send_status_update', { chat_id: status.chat_id, summary: 'Sent while phone offline', level: 'warning' });

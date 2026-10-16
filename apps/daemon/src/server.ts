@@ -4,13 +4,16 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { AnsweredVia } from '@heyloop/protocol';
+import { Workspace } from '@heyloop/protocol/relay';
 import { ApprovalBroker } from './broker.js';
 import { dataDir, type Config } from './config.js';
 import { createMcpServer } from './mcp.js';
 import { RelayClient } from './relay-client.js';
 import { Store } from './store.js';
+import { WindowRegistry } from './windows.js';
 
 const MAX_BODY_BYTES = 1_000_000;
+const SSE_PING_MS = 25_000;
 
 const AnswerBody = z.object({
   option_id: z.string().optional(),
@@ -58,7 +61,7 @@ function isAuthorized(req: IncomingMessage, token: string): boolean {
   return given.length === expected.length && timingSafeEqual(given, expected);
 }
 
-export function startDaemon(config: Config): Server {
+export function startDaemon(config: Config, windows = new WindowRegistry()): Server {
   const store = new Store(dataDir(), config.machine_id);
   const broker = new ApprovalBroker(store);
   const transports = new Map<string, StreamableHTTPServerTransport>();
@@ -96,6 +99,33 @@ export function startDaemon(config: Config): Server {
     const parts = url.pathname.split('/').filter(Boolean).slice(1);
     const [resource, id, sub] = parts;
 
+    if (resource === 'windows' && id === 'events' && !sub && req.method === 'GET') {
+      const workspace = parse(Workspace, {
+        id: url.searchParams.get('id'),
+        name: url.searchParams.get('name'),
+      });
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive',
+      });
+      res.flushHeaders();
+      const ping = setInterval(() => res.write(': ping\n\n'), SSE_PING_MS);
+      ping.unref();
+      const unregister = windows.register(
+        workspace,
+        (event) => res.write(`data: ${JSON.stringify(event)}\n\n`),
+        () => {
+          clearInterval(ping);
+          res.end();
+        },
+      );
+      req.on('close', () => {
+        clearInterval(ping);
+        unregister();
+      });
+      return;
+    }
     if (resource === 'chats' && !id && req.method === 'GET') {
       return send(res, 200, store.listChats());
     }
@@ -151,7 +181,7 @@ export function startDaemon(config: Config): Server {
 
   server.listen(config.port, '127.0.0.1');
   if (config.relay) {
-    new RelayClient(config.relay, { id: config.machine_id, name: config.machine_name }, store, broker).start();
+    new RelayClient(config.relay, { id: config.machine_id, name: config.machine_name }, store, broker, windows).start();
   }
   return server;
 }
