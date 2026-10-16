@@ -186,5 +186,11 @@ export const DEFAULT_CONFIRM_OPTIONS: ApprovalOption[] = [
 export const ExtensionEvent = z.discriminatedUnion('type', [
   // Open a new Copilot chat in Agent mode and auto-submit `prompt`.
   z.object({ type: z.literal('new_chat'), chat_id: z.string(), chat_key: z.string(), prompt: z.string() }),
+  // Submit `text` into the existing Copilot chat `session_id` (VS Code's `vscode.conversationId`), if this window owns it.
+  // The owning window confirms with POST /api/windows/delivered; unconfirmed messages stay in the agent's inbox.
+  z.object({ type: z.literal('prompt'), message_id: z.string(), chat_id: z.string(), session_id: z.string(), text: z.string() }),
 ]);
 export type ExtensionEvent = z.infer<typeof ExtensionEvent>;
+
+export const PromptDelivered = z.object({ message_id: z.string().min(1).max(64), window_id: z.string().min(1).max(64) });
+export type PromptDelivered = z.infer<typeof PromptDelivered>;
