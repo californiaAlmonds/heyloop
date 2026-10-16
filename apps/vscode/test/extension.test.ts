@@ -1,9 +1,18 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
+import { PromptDelivered } from '@heyloop/protocol';
 import { configPath, dataDir, loadConfig } from '../src/config.js';
+import {
+  buildDeliveredRequest,
+  createPromptQueue,
+  ownsSession,
+  postPromptDelivered,
+  sessionUri,
+  sessionUriString,
+} from '../src/session.js';
 import { SseParser } from '../src/sse.js';
 
 describe('SseParser', () => {
@@ -102,3 +111,115 @@ describe('config loading', () => {
     assert.equal(existsSync(tempDir), false);
   });
 });
+
+describe('session helpers', () => {
+  it('encodes sessionUri / sessionUriString as vscode-chat-session://local/<base64url>', () => {
+    const id = 'dc621762-e451-4fab-ab81-c6be84cb738e';
+    const expected = 'vscode-chat-session://local/ZGM2MjE3NjItZTQ1MS00ZmFiLWFiODEtYzZiZTg0Y2I3Mzhl';
+    assert.equal(sessionUri(id), expected);
+    assert.equal(sessionUriString(id), expected);
+
+    // Ensure base64url without padding (`=`) and using `-` / `_`
+    const urlUnsafeUtf8 = 'session?>>id';
+    const uri = sessionUri(urlUnsafeUtf8);
+    assert.ok(uri.startsWith('vscode-chat-session://local/'));
+    const pathPart = uri.slice('vscode-chat-session://local/'.length);
+    assert.equal(pathPart.includes('='), false);
+    assert.equal(pathPart.includes('+'), false);
+    assert.equal(pathPart.includes('/'), false);
+    assert.equal(Buffer.from(pathPart, 'base64url').toString('utf8'), urlUnsafeUtf8);
+  });
+
+  it('ownsSession checks chatSessions/<id>.jsonl or .json and rejects missing dirs or traversal ids', () => {
+    const tempDir = mkdtempSync(join(import.meta.dirname, '.tmp-heyloop-storage-'));
+    try {
+      // Missing storageDir or missing chatSessions directory
+      assert.equal(ownsSession(undefined, 's1'), false);
+      assert.equal(ownsSession('', 's1'), false);
+      assert.equal(ownsSession(tempDir, 's1'), false);
+      assert.equal(ownsSession(join(tempDir, 'nonexistent'), 's1'), false);
+
+      const chatSessionsDir = join(tempDir, 'chatSessions');
+      mkdirSync(chatSessionsDir, { recursive: true });
+      writeFileSync(join(chatSessionsDir, 'sess-jsonl.jsonl'), '{}\n');
+      writeFileSync(join(chatSessionsDir, 'sess-json.json'), '{}');
+      writeFileSync(join(tempDir, 'outside.jsonl'), '{}\n');
+
+      assert.equal(ownsSession(tempDir, 'sess-jsonl'), true);
+      assert.equal(ownsSession(tempDir, 'sess-json'), true);
+      assert.equal(ownsSession(tempDir, 'missing-sess'), false);
+      assert.equal(ownsSession(tempDir, ''), false);
+
+      // Reject path separators and .. even when target files exist
+      assert.equal(ownsSession(tempDir, '../outside'), false);
+      assert.equal(ownsSession(tempDir, '..\\outside'), false);
+      assert.equal(ownsSession(tempDir, 'sub/sess-jsonl'), false);
+      assert.equal(ownsSession(tempDir, 'sub\\sess-jsonl'), false);
+      assert.equal(ownsSession(tempDir, 'sess..bad'), false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('builds and posts the PromptDelivered ack request with the expected shape', async () => {
+    const config = { port: 4519, token: 'test-token-123' };
+    const payload = { message_id: 'msg-42', window_id: 'win-abc' };
+
+    const req = buildDeliveredRequest(config, payload);
+    assert.equal(req.url, 'http://127.0.0.1:4519/api/windows/delivered');
+    assert.equal(req.init.method, 'POST');
+    assert.deepEqual(req.init.headers, {
+      Authorization: 'Bearer test-token-123',
+      'Content-Type': 'application/json',
+    });
+    assert.deepEqual(PromptDelivered.parse(JSON.parse(req.init.body)), payload);
+
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    await postPromptDelivered(config, payload, (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as typeof fetch);
+
+    assert.equal(calls.length, 1);
+    const call = calls[0];
+    assert.ok(call);
+    assert.equal(call.url, 'http://127.0.0.1:4519/api/windows/delivered');
+    assert.equal(call.init?.method, 'POST');
+    assert.deepEqual(call.init?.headers, {
+      Authorization: 'Bearer test-token-123',
+      'Content-Type': 'application/json',
+    });
+    assert.deepEqual(JSON.parse(String(call.init?.body)), payload);
+
+    await assert.rejects(
+      () =>
+        postPromptDelivered(config, payload, (async () => new Response('fail', { status: 500 })) as typeof fetch),
+      /HTTP 500/,
+    );
+  });
+
+  it('serializes prompt tasks sequentially in order and recovers after errors', async () => {
+    const enqueue = createPromptQueue();
+    const order: string[] = [];
+
+    const p1 = enqueue(async () => {
+      order.push('start-1');
+      await new Promise((r) => setTimeout(r, 20));
+      order.push('end-1');
+    });
+    const p2 = enqueue(async () => {
+      order.push('start-2');
+      throw new Error('boom');
+    }).catch(() => {
+      order.push('caught-2');
+    });
+    const p3 = enqueue(async () => {
+      order.push('start-3');
+      order.push('end-3');
+    });
+
+    await Promise.all([p1, p2, p3]);
+    assert.deepEqual(order, ['start-1', 'end-1', 'start-2', 'caught-2', 'start-3', 'end-3']);
+  });
+});
+
