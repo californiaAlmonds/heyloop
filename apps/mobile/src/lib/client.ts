@@ -1,6 +1,6 @@
 import type { Chat, Envelope } from '@heyloop/protocol';
 import { deriveKeys, open, seal, type PairingKeys, type PairingLink } from '@heyloop/protocol/crypto';
-import { DaemonFrame, RelayServerFrame, type PhoneFrame } from '@heyloop/protocol/relay';
+import { DaemonFrame, RelayServerFrame, type PhoneFrame, type Workspace } from '@heyloop/protocol/relay';
 import { randomUUID } from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import { useSyncExternalStore } from 'react';
@@ -28,6 +28,7 @@ export interface Snapshot {
   pairing: { relay: string; name: string } | null;
   status: ConnectionStatus;
   computerOnline: boolean;
+  workspaces: Workspace[];
   chats: Chat[];
   messages: Record<string, Envelope[]>;
 }
@@ -40,6 +41,7 @@ const EMPTY: Snapshot = {
   pairing: null,
   status: 'offline',
   computerOnline: false,
+  workspaces: [],
   chats: [],
   messages: {},
 };
@@ -76,7 +78,9 @@ class HeyLoopClient {
         if (state === 'background') {
           // A backgrounded socket can look alive for minutes; staying disconnected lets the relay ring the phone instead.
           this.disconnect();
-          if (this.keys && this.snapshot.status !== 'unauthorized') this.update({ status: 'offline', computerOnline: false });
+          if (this.keys && this.snapshot.status !== 'unauthorized') {
+            this.update({ status: 'offline', computerOnline: false, workspaces: [] });
+          }
         } else if (state === 'active' && this.keys && this.snapshot.status === 'offline') this.reconnectNow();
       });
       watchPushToken((token) => this.registerPush(token));
@@ -203,8 +207,8 @@ class HeyLoopClient {
       this.ws = undefined;
       clearInterval(this.ping);
       // 4401 also means the daemon hasn't claimed the room yet; the user retries manually.
-      if (ev.code === 4401) return this.update({ status: 'unauthorized', computerOnline: false });
-      this.update({ status: 'offline', computerOnline: false });
+      if (ev.code === 4401) return this.update({ status: 'unauthorized', computerOnline: false, workspaces: [] });
+      this.update({ status: 'offline', computerOnline: false, workspaces: [] });
       const delay = this.backoff + Math.random() * 500;
       this.backoff = Math.min(this.backoff * 2, MAX_BACKOFF_MS);
       this.retry = setTimeout(() => this.connect(), delay);
@@ -231,7 +235,7 @@ class HeyLoopClient {
       for (const [id, pending] of this.pending) this.transmit(id, pending);
       void getPushToken().then((token) => token && this.registerPush(token));
     } else if (frame.t === 'peer') {
-      this.update({ computerOnline: frame.online });
+      this.update(frame.online ? { computerOnline: true } : { computerOnline: false, workspaces: [] });
       // The relay sends peer status right after ready, so this also covers the initial sync.
       if (frame.online) this.send({ type: 'sync', cursors: { ...this.cursors } });
     } else if (frame.t === 'msg') {
@@ -273,6 +277,8 @@ class HeyLoopClient {
       }
       this.update({ messages });
       this.cache.persist({ chats: [], envelopes: fresh, cursors });
+    } else if (frame.type === 'workspaces') {
+      this.update({ workspaces: frame.workspaces });
     } else if (frame.type === 'result') {
       this.pending.delete(frame.ref);
       this.waiters.get(frame.ref)?.({ ok: frame.ok, error: frame.error });

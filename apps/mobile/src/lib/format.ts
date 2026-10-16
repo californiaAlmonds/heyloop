@@ -57,6 +57,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   not_found: 'Your computer no longer knows about this.',
   invalid_option: 'That option is no longer valid.',
   text_required: 'Type an answer first.',
+  window_offline: 'That VS Code window closed. Pick another.',
 };
 
 export function errorMessage(code: string | undefined): string {
