@@ -20,7 +20,7 @@ flowchart LR
 | `apps/relay` | done (local) | Pairing rooms, encrypted message queue; later push fan-out and remote MCP endpoint (claude.ai/ChatGPT) |
 | `apps/mobile` | in progress | Pairing, chat list, read-only conversation done; next approvals/reply/rename, cache, notifications, terminal view |
 | `docs/site` | static website | Product page and quick start; GitHub Pages Actions deploys this directory only |
-| `apps/vscode` (VS Code extension `heyloop-vscode`) | done (local .vsix) | Holds an SSE stream to the daemon per window (`GET /api/windows/events`); on `new_chat` opens a fresh Copilot chat in Agent mode and auto-submits the prompt. Later: window-focus presence |
+| `apps/vscode` (VS Code extension `heyloop-vscode`) | done (local .vsix) | Holds an SSE stream to the daemon per window (`GET /api/windows/events`); on `new_chat` opens a fresh Copilot chat in Agent mode and auto-submits the prompt; on `prompt` (phone reply in a linked chat) opens the owning session (`vscode-chat-session://local/<base64url id>`), submits the text, and acks `POST /api/windows/delivered`. Later: window-focus presence |
 
 ## Data model
 - **Chat**: `chat_id`, `source`, `title` (+`title_locked` after user rename), `status` = running | waiting_input | idle | stopped | error.
