@@ -43,11 +43,12 @@ Phase 1 (MVP): daemon **done** · relay **done (local)** · Android app **in pro
 - Verification: workspace typecheck passes; website anchors, image loading, copy/FAQ controls, and overflow/phone spacing checks pass at 320/390/768/1440px.
 
 ## Next
-1. Phase B (needs owner): redeploy relay; install dev APK + Metro; `heyloop pair --relay <deployed>`; `npm link -w @heyloop/daemon`; `heyloop autostart install`; `heyloop setup vscode --user`; verify a real push and an approval answered from the phone in a live Copilot chat.
-2. Presence + 30s desktop-first routing gate and stall nudge; deploy docs (README) for self-hosters.
-3. Cache limits: no pruning and only the newest 300 envelopes per chat are loaded (no lazy older history yet).
-4. Mobile `sync` cursors frame is unbatched (fine below ~10k chats; revisit only if chat counts grow).
-5. `smoke:relay` "offline messages are queued and delivered" failed once in 4 runs (timing flake); `daemon.log` has no rotation.
+1. Live loop verified 2026-10-16: a Copilot chat in VS Code posted a status and an approval through the deployed relay; the owner answered on the phone (dev APK + Metro LAN). Still to confirm: push doorbell with the app backgrounded/closed.
+2. Start a conversation from the phone (owner wants this later): needs a VS Code extension that receives a phone "new task" frame via the daemon and opens a Copilot chat with that prompt (architecture.md phase 2). Plan + owner approval first.
+3. Presence + 30s desktop-first routing gate and stall nudge.
+4. Cache limits: no pruning and only the newest 300 envelopes per chat are loaded (no lazy older history yet).
+5. Mobile `sync` cursors frame is unbatched (fine below ~10k chats; revisit only if chat counts grow).
+6. `smoke:relay` "offline messages are queued and delivered" failed once in 4 runs (timing flake); `daemon.log` has no rotation.
 
 ## Open items
 - `LICENSE` file — needs copyright holder name (package.json says MIT).
