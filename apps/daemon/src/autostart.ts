@@ -31,14 +31,16 @@ export function handleAutostart(action: string | undefined): void {
     case 'install': {
       const binPath = fileURLToPath(new URL('../bin/heyloop.mjs', import.meta.url));
       const logPath = join(dataDir(), 'daemon.log');
-      const lines = ['@echo off'];
-      if (process.env.HEYLOOP_HOME) {
-        lines.push(`set "HEYLOOP_HOME=${process.env.HEYLOOP_HOME}"`);
-      }
-      // Start-Process -WindowStyle Hidden spawns cmd/node detached so no console window lingers at login.
-      lines.push(
-        `powershell -NoProfile -NonInteractive -WindowStyle Hidden -Command "Start-Process -WindowStyle Hidden -FilePath 'cmd.exe' -ArgumentList '/d /s /c \\"\\"${process.execPath}\\" \\"${binPath}\\" start >> \\"${logPath}\\" 2>&1\\"'"`,
-      );
+      const q = (s: string) => s.replace(/'/g, "''");
+      const script = [
+        process.env.HEYLOOP_HOME ? `$env:HEYLOOP_HOME = '${q(process.env.HEYLOOP_HOME)}'` : '',
+        `Start-Process -WindowStyle Hidden -FilePath 'cmd.exe' -ArgumentList '/d /s /c ""${q(process.execPath)}" "${q(binPath)}" start >> "${q(logPath)}" 2>&1"'`,
+      ]
+        .filter(Boolean)
+        .join('; ');
+      // -EncodedCommand (UTF-16LE base64) sidesteps cmd/PowerShell quoting of paths with spaces.
+      const encoded = Buffer.from(script, 'utf16le').toString('base64');
+      const lines = ['@echo off', `powershell -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded}`];
       mkdirSync(startupDir(), { recursive: true });
       writeFileSync(file, lines.join('\r\n') + '\r\n');
       console.log(`Installed autostart launcher: ${file}`);

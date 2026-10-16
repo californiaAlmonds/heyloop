@@ -174,8 +174,8 @@ export function createMcpServer(store: Store, broker: ApprovalBroker): McpServer
       annotations,
     },
     async (args) => {
-      const chat = store.getChat(args.chat_id);
-      if (!chat) throw new Error(`Unknown chat_id "${args.chat_id}".`);
+      const chat = args.chat_id ? store.getChat(args.chat_id) : args.chat_key ? store.getChatByKey(args.chat_key) : undefined;
+      if (!chat) throw new Error('Unknown chat. Pass the chat_id or chat_key used in your earlier HeyLoop calls.');
       return toolResult({ chat_id: chat.chat_id, inbox: store.takeInbox(chat.chat_id) });
     },
   );

@@ -120,6 +120,12 @@ describe('MCP chat_key resolution and inbox delivery', () => {
       const inbox2 = await call('check_inbox', { chat_id: r1.chat_id });
       assert.equal(inbox2.inbox.length, 0);
 
+      // check_inbox resolves by chat_key too
+      store.append(r3.chat_id, 'user', { kind: 'text', text: 'msg by key' });
+      const byKey = await call('check_inbox', { chat_key: 'repo:feature-2' });
+      assert.equal(byKey.chat_id, r3.chat_id);
+      assert.equal(byKey.inbox[0].text, 'msg by key');
+
       // ask_human_approval and await_human_response include inbox and consume once
       store.append(r1.chat_id, 'user', { kind: 'text', text: 'msg before ask' });
       const ask = await call('ask_human_approval', {

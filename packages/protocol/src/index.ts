@@ -96,15 +96,16 @@ export type Envelope = z.infer<typeof Envelope>;
 
 // ---- MCP tool contracts ----
 
+export const ChatKey = z
+  .string()
+  .min(1)
+  .max(120)
+  .regex(/^[\w.:@\/-]+$/)
+  .describe('Stable key for this task/conversation, e.g. "<workspace-folder>:<task-slug>". Reuses the same chat across sessions; creates it on first use.');
+
 export const SendStatusUpdateInput = z.object({
   chat_id: z.string().optional().describe('Reuse the chat_id returned by your first HeyLoop call. Omit only for the first call of a task.'),
-  chat_key: z
-    .string()
-    .min(1)
-    .max(120)
-    .regex(/^[\w.:@\/-]+$/)
-    .optional()
-    .describe('Stable key for this task/conversation, e.g. "<workspace-folder>:<task-slug>". Reuses the same chat across sessions; creates it on first use.'),
+  chat_key: ChatKey.optional(),
   title: z.string().max(80).optional().describe('Short chat title; used only when a new chat is created.'),
   summary: z.string().min(1).max(200).describe('One or two sentences shown as the phone notification.'),
   detail: z.string().max(4000).optional().describe('Longer context shown when the message is expanded.'),
@@ -124,7 +125,10 @@ export const SendStatusUpdateOutput = z.object({
 });
 export type SendStatusUpdateOutput = z.infer<typeof SendStatusUpdateOutput>;
 
-export const CheckInboxInput = z.object({ chat_id: z.string() });
+export const CheckInboxInput = z.object({
+  chat_id: z.string().optional().describe('The chat_id from an earlier HeyLoop call.'),
+  chat_key: ChatKey.optional(),
+});
 export type CheckInboxInput = z.infer<typeof CheckInboxInput>;
 
 export const CheckInboxOutput = z.object({ chat_id: z.string(), inbox: z.array(InboxMessage) });
@@ -132,13 +136,7 @@ export type CheckInboxOutput = z.infer<typeof CheckInboxOutput>;
 
 export const AskHumanApprovalInput = z.object({
   chat_id: z.string().optional().describe('Reuse the chat_id returned by your first HeyLoop call.'),
-  chat_key: z
-    .string()
-    .min(1)
-    .max(120)
-    .regex(/^[\w.:@\/-]+$/)
-    .optional()
-    .describe('Stable key for this task/conversation, e.g. "<workspace-folder>:<task-slug>". Reuses the same chat across sessions; creates it on first use.'),
+  chat_key: ChatKey.optional(),
   title: z.string().max(80).optional().describe('Short chat title; used only when a new chat is created.'),
   question: z.string().min(1).max(200),
   context: z.string().max(2000).optional().describe('Concise summary of why you are asking.'),

@@ -22,7 +22,7 @@ HeyLoop relays your status updates and approval requests to the owner's phone.
 - On \`"pending"\`, keep calling \`await_human_response\` until you receive a decision.
 
 ## Inbox & availability
-- Call \`check_inbox\` at natural breakpoints to check for owner replies.
+- Call \`check_inbox\` with the same \`chat_key\` at natural breakpoints to check for owner replies.
 - Any \`inbox\` messages in any tool result are instructions from the owner—follow them immediately.
 - If the HeyLoop tools are unavailable (daemon not running), continue normally and mention it once.
 `;
