@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { PromptDelivered } from '@heyloop/protocol';
+import { PromptDelivered, SessionClaim } from '@heyloop/protocol';
 import type { DaemonConfig } from './config.js';
 
 export function sessionUriString(sessionId: string): string {
@@ -41,6 +41,8 @@ export interface DeliveredRequest {
   };
 }
 
+export type ClaimRequest = DeliveredRequest;
+
 export function buildDeliveredRequest(config: DaemonConfig, payload: PromptDelivered): DeliveredRequest {
   const body = PromptDelivered.parse(payload);
   const url = new URL('/api/windows/delivered', `http://127.0.0.1:${config.port}`).toString();
@@ -63,6 +65,34 @@ export async function postPromptDelivered(
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
   const req = buildDeliveredRequest(config, payload);
+  const res = await fetchImpl(req.url, req.init);
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+}
+
+export function buildClaimRequest(config: DaemonConfig, payload: SessionClaim): ClaimRequest {
+  const body = SessionClaim.parse(payload);
+  const url = new URL('/api/windows/claim', `http://127.0.0.1:${config.port}`).toString();
+  return {
+    url,
+    init: {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    },
+  };
+}
+
+export async function postSessionClaim(
+  config: DaemonConfig,
+  payload: SessionClaim,
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  const req = buildClaimRequest(config, payload);
   const res = await fetchImpl(req.url, req.init);
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`);

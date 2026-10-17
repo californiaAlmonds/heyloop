@@ -1,19 +1,23 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
-import { PromptDelivered } from '@heyloop/protocol';
+import { PromptDelivered, SessionClaim } from '@heyloop/protocol';
 import { configPath, dataDir, loadConfig } from '../src/config.js';
 import {
+  buildClaimRequest,
   buildDeliveredRequest,
   createPromptQueue,
   ownsSession,
   postPromptDelivered,
+  postSessionClaim,
   sessionUri,
   sessionUriString,
 } from '../src/session.js';
 import { SseParser } from '../src/sse.js';
+import { eventsUrl, workspaceKey } from '../src/workspace.js';
 
 describe('SseParser', () => {
   it('parses complete single-line data events', () => {
@@ -221,5 +225,127 @@ describe('session helpers', () => {
     await Promise.all([p1, p2, p3]);
     assert.deepEqual(order, ['start-1', 'end-1', 'start-2', 'caught-2', 'start-3', 'end-3']);
   });
+
+  it('builds and posts the SessionClaim request to /api/windows/claim with bearer token', async () => {
+    const config = { port: 4519, token: 'claim-token-456' };
+    const payload = { window_id: 'win-xyz', session_id: 'sess-789' };
+
+    const req = buildClaimRequest(config, payload);
+    assert.equal(req.url, 'http://127.0.0.1:4519/api/windows/claim');
+    assert.equal(req.init.method, 'POST');
+    assert.deepEqual(req.init.headers, {
+      Authorization: 'Bearer claim-token-456',
+      'Content-Type': 'application/json',
+    });
+    assert.deepEqual(SessionClaim.parse(JSON.parse(req.init.body)), payload);
+
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    await postSessionClaim(config, payload, (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as typeof fetch);
+
+    assert.equal(calls.length, 1);
+    const call = calls[0];
+    assert.ok(call);
+    assert.equal(call.url, 'http://127.0.0.1:4519/api/windows/claim');
+    assert.equal(call.init?.method, 'POST');
+    assert.deepEqual(call.init?.headers, {
+      Authorization: 'Bearer claim-token-456',
+      'Content-Type': 'application/json',
+    });
+    assert.deepEqual(JSON.parse(String(call.init?.body)), payload);
+
+    await assert.rejects(
+      () => postSessionClaim(config, payload, (async () => new Response('fail', { status: 403 })) as typeof fetch),
+      /HTTP 403/,
+    );
+  });
 });
+
+describe('workspace helpers', () => {
+  it('returns undefined for an empty window (no folders and no workspace file)', () => {
+    assert.equal(workspaceKey({ folders: [] }), undefined);
+    assert.equal(workspaceKey({ workspaceFile: undefined, folders: [] }), undefined);
+    assert.equal(workspaceKey({ workspaceFile: '', folders: [] }), undefined);
+  });
+
+  it('computes deterministic lowercase sha256 first-32-char hex of workspaceFile when present', () => {
+    const wfUri = 'file:///c%3A/dev/heyloop.code-workspace';
+    const expected = createHash('sha256').update(wfUri, 'utf8').digest('hex').slice(0, 32);
+
+    const key = workspaceKey({
+      workspaceFile: wfUri,
+      folders: ['file:///c%3A/dev/a', 'file:///c%3A/dev/b'],
+    });
+    assert.equal(key, expected);
+    assert.equal(key?.length, 32);
+    assert.match(key ?? '', /^[a-f0-9]{32}$/);
+    // Deterministic across calls and independent of folders when workspaceFile is set
+    assert.equal(workspaceKey({ workspaceFile: wfUri, folders: [] }), expected);
+  });
+
+  it('computes deterministic lowercase sha256 first-32-char hex of sorted folders joined by newline', () => {
+    const f1 = 'file:///c%3A/projects/alpha';
+    const f2 = 'file:///c%3A/projects/beta';
+    const expectedSingle = createHash('sha256').update(f1, 'utf8').digest('hex').slice(0, 32);
+    const expectedMulti = createHash('sha256')
+      .update(`${f1}\n${f2}`, 'utf8')
+      .digest('hex')
+      .slice(0, 32);
+
+    const k1 = workspaceKey({ folders: [f1] });
+    const k2 = workspaceKey({ folders: [f2] });
+    assert.equal(k1, expectedSingle);
+    assert.notEqual(k1, k2);
+
+    // Folder order does not matter and input array is not mutated
+    const reversed = [f2, f1];
+    const kForward = workspaceKey({ folders: [f1, f2] });
+    const kReverse = workspaceKey({ folders: reversed });
+    assert.equal(kForward, expectedMulti);
+    assert.equal(kReverse, expectedMulti);
+    assert.deepEqual(reversed, [f2, f1]);
+  });
+
+  it('builds the SSE events URL with id, name, workspace, and optional folder query params', () => {
+    const ws = '0123456789abcdef0123456789abcdef';
+    const withFolder = eventsUrl(4519, {
+      id: 'win-1',
+      name: 'heyloop',
+      workspace: ws,
+      folder: 'E:\\heyloop-wt\\ws-ext',
+    });
+    const parsedWith = new URL(withFolder);
+    assert.equal(parsedWith.origin, 'http://127.0.0.1:4519');
+    assert.equal(parsedWith.pathname, '/api/windows/events');
+    assert.equal(parsedWith.searchParams.get('id'), 'win-1');
+    assert.equal(parsedWith.searchParams.get('name'), 'heyloop');
+    assert.equal(parsedWith.searchParams.get('workspace'), ws);
+    assert.equal(parsedWith.searchParams.get('folder'), 'E:\\heyloop-wt\\ws-ext');
+
+    const withoutFolder = eventsUrl(4519, {
+      id: 'win-2',
+      name: 'Untitled window',
+      workspace: ws,
+    });
+    const parsedWithout = new URL(withoutFolder);
+    assert.equal(parsedWithout.origin, 'http://127.0.0.1:4519');
+    assert.equal(parsedWithout.pathname, '/api/windows/events');
+    assert.equal(parsedWithout.searchParams.get('id'), 'win-2');
+    assert.equal(parsedWithout.searchParams.get('name'), 'Untitled window');
+    assert.equal(parsedWithout.searchParams.get('workspace'), ws);
+    assert.equal(parsedWithout.searchParams.has('folder'), false);
+
+    // Validates WindowHello before building URL
+    assert.throws(() =>
+      eventsUrl(4519, {
+        id: 'win-bad',
+        name: 'heyloop',
+        workspace: 'NOT-HEX',
+      }),
+    );
+  });
+});
+
 
