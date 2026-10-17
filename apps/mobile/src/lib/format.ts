@@ -1,4 +1,12 @@
 import type { Chat, ChatStatus, Envelope, MessageBody } from '@heyloop/protocol';
+import type { Workspace } from '@heyloop/protocol/relay';
+
+export const OTHER_WORKSPACE_ID = 'other';
+
+export const WORKSPACE_COLORS = {
+  open: '#30a46c',
+  closed: '#9aa0a6',
+} as const;
 
 export const STATUS_COLORS: Record<ChatStatus, string> = {
   running: '#2f80ed',
@@ -15,6 +23,39 @@ export const STATUS_LABELS: Record<ChatStatus, string> = {
   stopped: 'Stopped',
   error: 'Error',
 };
+
+export function chatWorkspace(
+  chat: Pick<Chat, 'workspace_id'> | undefined,
+  workspaces: Workspace[],
+): Workspace | undefined {
+  return chat?.workspace_id ? workspaces.find((w) => w.id === chat.workspace_id) : undefined;
+}
+
+export function machineName(snap: {
+  machine: { name: string } | null;
+  pairing: { name: string } | null;
+}): string {
+  return snap.machine?.name ?? snap.pairing?.name ?? 'Computer';
+}
+
+export function chatLocationLabel(
+  workspace: Pick<Workspace, 'name'> | undefined,
+  machine: string | undefined,
+): string {
+  return [workspace?.name, machine].filter(Boolean).join(' · ');
+}
+
+export function workspaceOpenLabel(workspace: Pick<Workspace, 'open'> | undefined): 'Open' | 'Closed' {
+  return workspace?.open ? 'Open' : 'Closed';
+}
+
+export function chatCountLabel(count: number): string {
+  return `${count} chat${count === 1 ? '' : 's'}`;
+}
+
+export function workspaceCountLabel(count: number): string {
+  return `${count} workspace${count === 1 ? '' : 's'}`;
+}
 
 export function describe(body: MessageBody): string | undefined {
   switch (body.kind) {

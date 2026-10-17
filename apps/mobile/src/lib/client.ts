@@ -22,15 +22,22 @@ export interface SubmitResult {
   error?: string;
 }
 
+export interface Machine {
+  id: string;
+  name: string;
+}
+
 export interface Snapshot {
   loaded: boolean;
   /** Pairing metadata only; the secret never leaves this module. */
   pairing: { relay: string; name: string } | null;
+  machine: Machine | null;
   status: ConnectionStatus;
   computerOnline: boolean;
   workspaces: Workspace[];
   chats: Chat[];
   messages: Record<string, Envelope[]>;
+  favourites: ReadonlySet<string>;
 }
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
@@ -39,11 +46,13 @@ export type OutgoingFrame = DistributiveOmit<PhoneFrame, 'id'>;
 const EMPTY: Snapshot = {
   loaded: false,
   pairing: null,
+  machine: null,
   status: 'offline',
   computerOnline: false,
   workspaces: [],
   chats: [],
   messages: {},
+  favourites: new Set(),
 };
 
 class HeyLoopClient {
@@ -79,7 +88,7 @@ class HeyLoopClient {
           // A backgrounded socket can look alive for minutes; staying disconnected lets the relay ring the phone instead.
           this.disconnect();
           if (this.keys && this.snapshot.status !== 'unauthorized') {
-            this.update({ status: 'offline', computerOnline: false, workspaces: [] });
+            this.update({ status: 'offline', computerOnline: false, workspaces: this.closeWorkspaces() });
           }
         } else if (state === 'active' && this.keys && this.snapshot.status === 'offline') this.reconnectNow();
       });
@@ -103,6 +112,16 @@ class HeyLoopClient {
     await SecureStore.deleteItemAsync(PAIRING_KEY);
     this.reset();
     this.cache.clear();
+  }
+
+  toggleFavourite(chatId: string): boolean {
+    const next = new Set(this.snapshot.favourites);
+    const added = !next.has(chatId);
+    if (added) next.add(chatId);
+    else next.delete(chatId);
+    this.cache.setFavourite(chatId, added);
+    this.update({ favourites: next });
+    return added;
   }
 
   reconnectNow(): void {
@@ -161,9 +180,28 @@ class HeyLoopClient {
     this.keys = keys;
     if (cached) {
       this.cursors = cached.cursors;
-      this.update({ chats: cached.chats, messages: cached.messages });
+      const chatIds = new Set(cached.chats.map((c) => c.chat_id));
+      this.update({
+        workspaces: cached.workspaces.map((w) => ({ ...w, open: false })),
+        chats: cached.chats,
+        messages: cached.messages,
+        favourites: this.pruneFavourites(cached.favourites, chatIds),
+      });
     }
     this.connect();
+  }
+
+  private pruneFavourites(
+    favourites: Iterable<string>,
+    chats: ReadonlySet<string> | ReadonlyMap<string, unknown>,
+  ): Set<string> {
+    if (chats.size === 0) return new Set(favourites);
+    const next = new Set<string>();
+    for (const id of favourites) {
+      if (chats.has(id)) next.add(id);
+      else this.cache.setFavourite(id, false);
+    }
+    return next;
   }
 
   private reset(): void {
@@ -174,8 +212,12 @@ class HeyLoopClient {
     this.relay = undefined;
     this.keys = undefined;
     this.cursors = {};
-    this.snapshot = { ...EMPTY, loaded: true };
+    this.snapshot = { ...EMPTY, loaded: true, favourites: new Set() };
     this.emit();
+  }
+
+  private closeWorkspaces(): Workspace[] {
+    return this.snapshot.workspaces.map((w) => ({ ...w, open: false }));
   }
 
   private registerPush(token: string): void {
@@ -207,8 +249,10 @@ class HeyLoopClient {
       this.ws = undefined;
       clearInterval(this.ping);
       // 4401 also means the daemon hasn't claimed the room yet; the user retries manually.
-      if (ev.code === 4401) return this.update({ status: 'unauthorized', computerOnline: false, workspaces: [] });
-      this.update({ status: 'offline', computerOnline: false, workspaces: [] });
+      if (ev.code === 4401) {
+        return this.update({ status: 'unauthorized', computerOnline: false, workspaces: this.closeWorkspaces() });
+      }
+      this.update({ status: 'offline', computerOnline: false, workspaces: this.closeWorkspaces() });
       const delay = this.backoff + Math.random() * 500;
       this.backoff = Math.min(this.backoff * 2, MAX_BACKOFF_MS);
       this.retry = setTimeout(() => this.connect(), delay);
@@ -235,7 +279,9 @@ class HeyLoopClient {
       for (const [id, pending] of this.pending) this.transmit(id, pending);
       void getPushToken().then((token) => token && this.registerPush(token));
     } else if (frame.t === 'peer') {
-      this.update(frame.online ? { computerOnline: true } : { computerOnline: false, workspaces: [] });
+      this.update(
+        frame.online ? { computerOnline: true } : { computerOnline: false, workspaces: this.closeWorkspaces() },
+      );
       // The relay sends peer status right after ready, so this also covers the initial sync.
       if (frame.online) this.send({ type: 'sync', cursors: { ...this.cursors } });
     } else if (frame.t === 'msg') {
@@ -255,7 +301,11 @@ class HeyLoopClient {
     if (frame.type === 'chats') {
       const byId = new Map(this.snapshot.chats.map((c) => [c.chat_id, c]));
       for (const chat of frame.chats) byId.set(chat.chat_id, chat);
-      this.update({ chats: [...byId.values()] });
+      this.update({
+        machine: frame.machine,
+        chats: [...byId.values()],
+        favourites: this.pruneFavourites(this.snapshot.favourites, byId),
+      });
       this.cache.persist({ chats: frame.chats, envelopes: [], cursors: {} });
     } else if (frame.type === 'envelopes') {
       const messages = { ...this.snapshot.messages };
@@ -278,7 +328,9 @@ class HeyLoopClient {
       this.update({ messages });
       this.cache.persist({ chats: [], envelopes: fresh, cursors });
     } else if (frame.type === 'workspaces') {
-      this.update({ workspaces: frame.workspaces });
+      const workspaces = frame.workspaces.map((w) => ({ ...w, open: w.open ?? true }));
+      this.update({ workspaces });
+      this.cache.setWorkspaces(workspaces);
     } else if (frame.type === 'result') {
       this.pending.delete(frame.ref);
       this.waiters.get(frame.ref)?.({ ok: frame.ok, error: frame.error });

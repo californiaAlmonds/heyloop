@@ -1,4 +1,4 @@
-import { useRouter, useTheme } from 'expo-router';
+import { useLocalSearchParams, useRouter, useTheme } from 'expo-router';
 import { useHeaderHeight } from 'expo-router/react-navigation';
 import { useEffect, useState } from 'react';
 import { Keyboard, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -9,15 +9,25 @@ import { useAction } from '@/lib/use-action';
 const DANGER = '#e5484d';
 
 export default function NewChat() {
+  const { workspace: preselectedWorkspace } = useLocalSearchParams<{ workspace?: string }>();
   const router = useRouter();
   const { colors } = useTheme();
   const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
   const snap = useHeyLoop();
   const { busy, error, run } = useAction();
-  const [selectedId, setSelectedId] = useState<string | undefined>(() =>
-    snap.workspaces.length === 1 ? snap.workspaces[0].id : undefined,
+
+  const openWorkspaces = snap.workspaces.filter((w) => w.open);
+  const sortedWorkspaces = [...snap.workspaces].sort(
+    (a, b) => Number(Boolean(b.open)) - Number(Boolean(a.open)) || a.name.localeCompare(b.name),
   );
+
+  const [selectedId, setSelectedId] = useState<string | undefined>(() => {
+    if (preselectedWorkspace && openWorkspaces.some((w) => w.id === preselectedWorkspace)) {
+      return preselectedWorkspace;
+    }
+    return openWorkspaces.length === 1 ? openWorkspaces[0].id : undefined;
+  });
   const [text, setText] = useState('');
   const [keyboardOpen, setKeyboardOpen] = useState(Keyboard.isVisible());
 
@@ -30,11 +40,13 @@ export default function NewChat() {
     };
   }, []);
 
-  const workspaceId = snap.workspaces.some((w) => w.id === selectedId)
+  const workspaceId = openWorkspaces.some((w) => w.id === selectedId)
     ? selectedId
-    : snap.workspaces.length === 1
-      ? snap.workspaces[0].id
-      : undefined;
+    : preselectedWorkspace && openWorkspaces.some((w) => w.id === preselectedWorkspace)
+      ? preselectedWorkspace
+      : openWorkspaces.length === 1
+        ? openWorkspaces[0].id
+        : undefined;
 
   const body = text.trim();
   const canSend = snap.status === 'online' && snap.computerOnline && Boolean(workspaceId) && Boolean(body) && !busy;
@@ -50,44 +62,56 @@ export default function NewChat() {
   return (
     <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={headerHeight} style={styles.fill}>
       <ScrollView style={styles.fill} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>VS Code window</Text>
-        {snap.workspaces.length === 0 ? (
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Workspace</Text>
+        {sortedWorkspaces.length === 0 ? (
           <Text style={[styles.empty, { color: colors.text }]}>Open VS Code with the HeyLoop extension</Text>
         ) : (
-          <View style={styles.list}>
-            {snap.workspaces.map((workspace) => {
-              const selected = workspace.id === workspaceId;
-              return (
-                <Pressable
-                  key={workspace.id}
-                  accessibilityRole="button"
-                  accessibilityLabel={workspace.name}
-                  accessibilityState={{ selected }}
-                  disabled={busy}
-                  onPress={() => setSelectedId(workspace.id)}
-                  style={[
-                    styles.item,
-                    {
-                      backgroundColor: colors.card,
-                      borderColor: selected ? colors.primary : colors.border,
-                    },
-                    selected && styles.itemSelected,
-                  ]}
-                >
-                  <View
+          <>
+            {openWorkspaces.length === 0 && (
+              <Text style={[styles.empty, { color: colors.text }]}>
+                No workspace is open. Open one in VS Code to start a chat.
+              </Text>
+            )}
+            <View style={styles.list}>
+              {sortedWorkspaces.map((workspace) => {
+                const isOpen = Boolean(workspace.open);
+                const selected = isOpen && workspace.id === workspaceId;
+                return (
+                  <Pressable
+                    key={workspace.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={isOpen ? workspace.name : `${workspace.name}, Closed`}
+                    accessibilityState={{ selected, disabled: !isOpen || busy }}
+                    disabled={!isOpen || busy}
+                    onPress={() => setSelectedId(workspace.id)}
                     style={[
-                      styles.radio,
-                      { borderColor: selected ? colors.primary : colors.border },
-                      selected && { backgroundColor: colors.primary },
+                      styles.item,
+                      {
+                        backgroundColor: colors.card,
+                        borderColor: selected ? colors.primary : colors.border,
+                        opacity: isOpen ? 1 : 0.5,
+                      },
+                      selected && styles.itemSelected,
                     ]}
-                  />
-                  <Text style={[styles.itemName, { color: colors.text }]} numberOfLines={1}>
-                    {workspace.name}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+                  >
+                    <View
+                      style={[
+                        styles.radio,
+                        { borderColor: selected ? colors.primary : colors.border },
+                        selected && { backgroundColor: colors.primary },
+                      ]}
+                    />
+                    <Text style={[styles.itemName, { color: colors.text }]} numberOfLines={1}>
+                      {workspace.name}
+                    </Text>
+                    {!isOpen && (
+                      <Text style={[styles.closedLabel, { color: colors.text }]}>Closed</Text>
+                    )}
+                  </Pressable>
+                );
+              })}
+            </View>
+          </>
         )}
       </ScrollView>
       <View style={[styles.composer, { borderColor: colors.border, paddingBottom: 8 + (keyboardOpen ? 0 : insets.bottom) }]}>
@@ -136,6 +160,7 @@ const styles = StyleSheet.create({
   itemSelected: { borderWidth: 2, paddingHorizontal: 13, paddingVertical: 11 },
   radio: { width: 14, height: 14, borderRadius: 7, borderWidth: 2 },
   itemName: { flex: 1, fontSize: 15, fontWeight: '600' },
+  closedLabel: { fontSize: 12, opacity: 0.7 },
   composer: { paddingHorizontal: 12, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth, gap: 6 },
   row: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
   input: {
