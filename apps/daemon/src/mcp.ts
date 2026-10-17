@@ -21,6 +21,7 @@ import {
 } from '@heyloop/protocol';
 import type { ApprovalBroker } from './broker.js';
 import type { ApprovalRequest, Store } from './store.js';
+import type { WindowRegistry } from './windows.js';
 
 const DEFAULT_WAIT_SECONDS = 45;
 const DEFAULT_TIMEOUT_MINUTES = 60;
@@ -62,13 +63,16 @@ function detectSource(clientName: string | undefined): ChatSource {
 
 const SESSION_ID_RE = /^[\w-]{1,128}$/;
 
-export function createMcpServer(store: Store, broker: ApprovalBroker): McpServer {
+export function createMcpServer(store: Store, broker: ApprovalBroker, windows?: WindowRegistry): McpServer {
   const server = new McpServer({ name: 'heyloop', version: '0.0.0' }, { instructions: INSTRUCTIONS });
 
   const captureSession = (chatId: string, extra: Extra) => {
     const raw = extra._meta?.['vscode.conversationId'];
     if (typeof raw === 'string' && SESSION_ID_RE.test(raw) && store.getVscodeSession(chatId) !== raw) {
       store.setVscodeSession(chatId, raw);
+      if (!store.getChatWorkspace(chatId)) {
+        windows?.broadcast({ type: 'whose_session', session_id: raw });
+      }
     }
   };
 

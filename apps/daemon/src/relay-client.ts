@@ -34,12 +34,13 @@ export class RelayClient {
     private machine: { id: string; name: string },
     private store: Store,
     private broker: ApprovalBroker,
-    private windows: WindowRegistry = new WindowRegistry(),
+    private windows: WindowRegistry = new WindowRegistry(store),
   ) {
     this.keys = deriveKeys(relay.secret);
+    this.windows.setStore(store);
     store.on('envelope', (envelope) => this.sendFrame({ type: 'envelopes', envelopes: [envelope] }, pushHint(envelope)));
     store.on('chat', (chat) => this.sendFrame({ type: 'chats', machine: this.machine, chats: [chat] }));
-    windows.on('change', () => this.sendFrame({ type: 'workspaces', workspaces: this.windows.list() }));
+    windows.on('change', () => this.sendFrame({ type: 'workspaces', workspaces: this.windows.workspaces() }));
   }
 
   start(): void {
@@ -121,7 +122,7 @@ export class RelayClient {
 
     switch (frame.type) {
       case 'sync': {
-        this.sendFrame({ type: 'workspaces', workspaces: this.windows.list() });
+        this.sendFrame({ type: 'workspaces', workspaces: this.windows.workspaces() });
         const chats = this.store.listChats();
         for (const batch of batchChats(chats, this.machine)) {
           this.sendFrame({ type: 'chats', machine: this.machine, chats: batch });
@@ -139,17 +140,23 @@ export class RelayClient {
         return result.ok ? reply(true) : reply(false, result.error);
       }
       case 'say': {
-        if (!this.store.getChat(frame.chat_id)) return reply(false, 'not_found');
+        const chat = this.store.getChat(frame.chat_id);
+        if (!chat) return reply(false, 'not_found');
         const env = this.store.append(frame.chat_id, 'user', { kind: 'text', text: frame.text });
         const sessionId = this.store.getVscodeSession(frame.chat_id);
         if (sessionId) {
-          this.windows.broadcast({
-            type: 'prompt',
+          const event = {
+            type: 'prompt' as const,
             message_id: env.id,
             chat_id: frame.chat_id,
             session_id: sessionId,
             text: frame.text,
-          });
+          };
+          if (chat.workspace_id) {
+            this.windows.sendToWorkspace(chat.workspace_id, event);
+          } else {
+            this.windows.broadcast(event);
+          }
         }
         return reply(true);
       }
@@ -162,14 +169,15 @@ export class RelayClient {
         // Consumed by desktop-first routing (not built yet).
         return reply(true);
       case 'new_chat': {
-        if (!this.windows.has(frame.workspace_id)) return reply(false, 'window_offline');
+        const win = this.windows.windowForWorkspace(frame.workspace_id);
+        if (!win) return reply(false, 'window_offline');
         const chatKey = `phone:${frame.id}`;
         const firstLine = frame.text.split(/\r?\n/, 1)[0]?.trim() || 'New chat';
         const title = firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine;
-        const chat = this.store.createChat('vscode', title, chatKey);
+        const chat = this.store.createChat('vscode', title, chatKey, frame.workspace_id);
         this.store.append(chat.chat_id, 'user', { kind: 'text', text: frame.text }, true);
         const prompt = `${frame.text}\n\n---\nThis task was started from the HeyLoop phone app. Use chat_key "${chatKey}" on every HeyLoop call for this task so your updates reach the same phone chat.`;
-        this.windows.send(frame.workspace_id, { type: 'new_chat', chat_id: chat.chat_id, chat_key: chatKey, prompt });
+        this.windows.send(win.id, { type: 'new_chat', chat_id: chat.chat_id, chat_key: chatKey, prompt });
         return reply(true);
       }
     }

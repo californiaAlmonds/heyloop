@@ -3,8 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { AnsweredVia, PromptDelivered } from '@heyloop/protocol';
-import { Workspace } from '@heyloop/protocol/relay';
+import { AnsweredVia, PromptDelivered, SessionClaim, WindowHello } from '@heyloop/protocol';
 import { ApprovalBroker } from './broker.js';
 import { dataDir, type Config } from './config.js';
 import { createMcpServer } from './mcp.js';
@@ -14,6 +13,8 @@ import { WindowRegistry } from './windows.js';
 
 const MAX_BODY_BYTES = 1_000_000;
 const SSE_PING_MS = 25_000;
+const MAX_CONNECTED_WINDOWS = 32;
+const MAX_REPLAY_MESSAGES = 200;
 
 const AnswerBody = z.object({
   option_id: z.string().optional(),
@@ -63,6 +64,7 @@ function isAuthorized(req: IncomingMessage, token: string): boolean {
 
 export function startDaemon(config: Config, windows = new WindowRegistry()): Server {
   const store = new Store(dataDir(), config.machine_id);
+  windows.setStore(store);
   const broker = new ApprovalBroker(store);
   const transports = new Map<string, StreamableHTTPServerTransport>();
   // Host allowlist blocks DNS-rebinding attacks from web pages.
@@ -84,7 +86,7 @@ export function startDaemon(config: Config, windows = new WindowRegistry()): Ser
         created.onclose = () => {
           if (created.sessionId) transports.delete(created.sessionId);
         };
-        await createMcpServer(store, broker).connect(created);
+        await createMcpServer(store, broker, windows).connect(created);
         transport = created;
       }
       await transport.handleRequest(req, res, body);
@@ -100,10 +102,17 @@ export function startDaemon(config: Config, windows = new WindowRegistry()): Ser
     const [resource, id, sub] = parts;
 
     if (resource === 'windows' && id === 'events' && !sub && req.method === 'GET') {
-      const workspace = parse(Workspace, {
+      const hello = parse(WindowHello, {
         id: url.searchParams.get('id'),
         name: url.searchParams.get('name'),
+        workspace: url.searchParams.get('workspace'),
+        folder: url.searchParams.get('folder') ?? undefined,
       });
+      const replacesExisting = windows.has(hello.id);
+      if (!replacesExisting && windows.size >= MAX_CONNECTED_WINDOWS) {
+        throw new HttpError(429, 'Too many connected windows');
+      }
+      const shouldReplay = replacesExisting || !windows.openWorkspaceIds().has(hello.workspace);
       res.writeHead(200, {
         'content-type': 'text/event-stream',
         'cache-control': 'no-cache',
@@ -113,7 +122,7 @@ export function startDaemon(config: Config, windows = new WindowRegistry()): Ser
       const ping = setInterval(() => res.write(': ping\n\n'), SSE_PING_MS);
       ping.unref();
       const unregister = windows.register(
-        workspace,
+        hello,
         (event) => res.write(`data: ${JSON.stringify(event)}\n\n`),
         () => {
           clearInterval(ping);
@@ -124,7 +133,62 @@ export function startDaemon(config: Config, windows = new WindowRegistry()): Ser
         clearInterval(ping);
         unregister();
       });
+      if (shouldReplay) {
+        let remaining = MAX_REPLAY_MESSAGES;
+        let writable = true;
+        outer: for (const chat of store.chatsByWorkspace(hello.workspace)) {
+          const sessionId = store.getVscodeSession(chat.chat_id);
+          if (!sessionId) continue;
+          for (const msg of store.peekInbox(chat.chat_id, remaining)) {
+            if (
+              !windows.send(hello.id, {
+                type: 'prompt',
+                message_id: msg.id,
+                chat_id: chat.chat_id,
+                session_id: sessionId,
+                text: msg.text,
+              })
+            ) {
+              writable = false;
+              break outer;
+            }
+            if (--remaining <= 0) break outer;
+          }
+        }
+        if (writable) {
+          for (const sessionId of store.unclaimedSessions()) {
+            if (!windows.send(hello.id, { type: 'whose_session', session_id: sessionId })) break;
+          }
+        }
+      }
       return;
+    }
+    if (resource === 'windows' && id === 'claim' && !sub && req.method === 'POST') {
+      const { window_id, session_id } = parse(SessionClaim, await readJson(req));
+      const workspaceId = windows.workspaceForWindow(window_id);
+      if (!workspaceId) throw new HttpError(404, 'Window not found');
+      let remaining = MAX_REPLAY_MESSAGES;
+      let writable = true;
+      for (const chat of store.chatsByVscodeSession(session_id)) {
+        if (!store.setChatWorkspace(chat.chat_id, workspaceId)) continue;
+        if (!writable || remaining <= 0) continue;
+        for (const msg of store.peekInbox(chat.chat_id, remaining)) {
+          if (
+            !windows.send(window_id, {
+              type: 'prompt',
+              message_id: msg.id,
+              chat_id: chat.chat_id,
+              session_id,
+              text: msg.text,
+            })
+          ) {
+            writable = false;
+            break;
+          }
+          if (--remaining <= 0) break;
+        }
+      }
+      return send(res, 200, { ok: true });
     }
     if (resource === 'windows' && id === 'delivered' && !sub && req.method === 'POST') {
       const { message_id } = parse(PromptDelivered, await readJson(req));
@@ -169,7 +233,7 @@ export function startDaemon(config: Config, windows = new WindowRegistry()): Ser
     throw new HttpError(404, 'Not found');
   };
 
-  const server = createServer(async (req, res) => {
+  const server = createServer({ highWaterMark: 65536 }, async (req, res) => {
     try {
       if (!allowedHosts.has(req.headers.host ?? '')) throw new HttpError(403, 'Forbidden host');
       // 403, not 401: a 401 makes VS Code start an OAuth sign-in flow HeyLoop doesn't support.
