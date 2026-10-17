@@ -17,6 +17,8 @@ export const Chat = z.object({
   status: ChatStatus,
   last_heartbeat: z.string(),
   created_at: z.string(),
+  /** Stable VS Code workspace id (relay.ts `Workspace.id`) once known; absent for non-VS Code agents. */
+  workspace_id: z.string().optional(),
 });
 export type Chat = z.infer<typeof Chat>;
 
@@ -180,8 +182,21 @@ export const DEFAULT_CONFIRM_OPTIONS: ApprovalOption[] = [
 ];
 
 // ---- Daemon <-> VS Code extension (localhost, bearer token) ----
-// The extension keeps GET /api/windows/events?id=<window_id>&name=<workspace name> open as an SSE stream;
-// the window is listed on the phone while that stream is connected.
+// The extension keeps GET /api/windows/events?id=<window_id>&name=<workspace name>&workspace=<stable id>[&folder=<abs path>] open as an SSE stream;
+// the workspace is shown as open on the phone while at least one of its windows is connected.
+
+/** Query of the SSE connection. `workspace` = stable id (hex hash of the workspace file or folder URIs); `folder` stays on this machine. */
+export const WindowHello = z.object({
+  id: z.string().min(1).max(64),
+  name: z.string().min(1).max(120),
+  workspace: z.string().regex(/^[a-f0-9]{8,64}$/),
+  folder: z.string().min(1).max(1024).optional(),
+});
+export type WindowHello = z.infer<typeof WindowHello>;
+
+/** Sent by the window that owns a Copilot session in reply to `whose_session`: POST /api/windows/claim. */
+export const SessionClaim = z.object({ window_id: z.string().min(1).max(64), session_id: z.string().min(1).max(128) });
+export type SessionClaim = z.infer<typeof SessionClaim>;
 
 export const ExtensionEvent = z.discriminatedUnion('type', [
   // Open a new Copilot chat in Agent mode and auto-submit `prompt`.
@@ -189,6 +204,8 @@ export const ExtensionEvent = z.discriminatedUnion('type', [
   // Submit `text` into the existing Copilot chat `session_id` (VS Code's `vscode.conversationId`), if this window owns it.
   // The owning window confirms with POST /api/windows/delivered; unconfirmed messages stay in the agent's inbox.
   z.object({ type: z.literal('prompt'), message_id: z.string(), chat_id: z.string(), session_id: z.string(), text: z.string() }),
+  // Which window owns this Copilot session? The owner answers with POST /api/windows/claim (SessionClaim).
+  z.object({ type: z.literal('whose_session'), session_id: z.string() }),
 ]);
 export type ExtensionEvent = z.infer<typeof ExtensionEvent>;
 

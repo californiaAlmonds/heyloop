@@ -41,8 +41,12 @@ export type RelayServerFrame = z.infer<typeof RelayServerFrame>;
 
 // ---- End-to-end encrypted app frames ----
 
-/** An open VS Code window that can receive phone-started chats. */
-export const Workspace = z.object({ id: z.string().min(1).max(64), name: z.string().min(1).max(120) });
+/** A VS Code workspace on this machine (stable id from its folder or .code-workspace file). `open` = a window has it open now. */
+export const Workspace = z.object({
+  id: z.string().min(1).max(64),
+  name: z.string().min(1).max(120),
+  open: z.boolean().optional(),
+});
 export type Workspace = z.infer<typeof Workspace>;
 
 export const DaemonFrame = z.discriminatedUnion('type', [
@@ -53,7 +57,7 @@ export const DaemonFrame = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('envelopes'), envelopes: z.array(Envelope) }),
   z.object({ type: z.literal('result'), ref: z.string(), ok: z.boolean(), error: z.string().optional() }),
-  // Full list of connected VS Code windows; sent on sync and whenever it changes.
+  // All known workspaces on this machine with their open state; sent on sync and whenever it changes.
   z.object({ type: z.literal('workspaces'), workspaces: z.array(Workspace) }),
 ]);
 export type DaemonFrame = z.infer<typeof DaemonFrame>;
@@ -70,7 +74,7 @@ export const PhoneFrame = z.discriminatedUnion('type', [
   z.object({ type: z.literal('say'), id: z.string(), chat_id: z.string(), text: z.string().min(1).max(4000) }),
   z.object({ type: z.literal('rename'), id: z.string(), chat_id: z.string(), title: z.string().min(1).max(80) }),
   z.object({ type: z.literal('presence'), id: z.string(), state: PresenceState }),
-  // Start a new agent chat in a VS Code window; result errors: 'window_offline'.
+  // Start a new agent chat in an open workspace (stable workspace id); result errors: 'window_offline'.
   z.object({ type: z.literal('new_chat'), id: z.string(), workspace_id: z.string().min(1).max(64), text: z.string().min(1).max(4000) }),
 ]);
 export type PhoneFrame = z.infer<typeof PhoneFrame>;
