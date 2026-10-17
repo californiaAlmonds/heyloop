@@ -2,8 +2,15 @@ import { dirname } from 'node:path';
 import { ExtensionEvent } from '@heyloop/protocol';
 import * as vscode from 'vscode';
 import { type DaemonConfig, loadConfig } from './config.js';
-import { createPromptQueue, ownsSession, postPromptDelivered, sessionUriString } from './session.js';
+import {
+  createPromptQueue,
+  ownsSession,
+  postPromptDelivered,
+  postSessionClaim,
+  sessionUriString,
+} from './session.js';
 import { SseParser } from './sse.js';
+import { eventsUrl, workspaceKey } from './workspace.js';
 
 const INITIAL_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 30_000;
@@ -68,6 +75,20 @@ async function handleEvent(rawData: string, ctx: EventContext): Promise<void> {
         log(`Failed to deliver prompt message_id=${event.message_id}: ${msg}`);
       }
     });
+  } else if (event.type === 'whose_session') {
+    if (!ownsSession(ctx.workspaceStorageDir, event.session_id)) {
+      return;
+    }
+    log(`Claiming session_id=${event.session_id}`);
+    try {
+      await postSessionClaim(ctx.config, {
+        window_id: ctx.windowId,
+        session_id: event.session_id,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log(`Failed to claim session_id=${event.session_id}: ${msg}`);
+    }
   }
 }
 
@@ -148,6 +169,27 @@ export function activate(context: vscode.ExtensionContext): void {
   const runLoop = async (): Promise<void> => {
     while (!disposed) {
       manualReconnectRequested = false;
+
+      const workspaceFile = vscode.workspace.workspaceFile;
+      const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
+      const workspace = workspaceKey({
+        workspaceFile: workspaceFile?.toString(),
+        folders: workspaceFolders.map((f) => f.uri.toString()),
+      });
+
+      if (!workspace) {
+        statusBar.text = 'HeyLoop: no workspace';
+        statusBar.tooltip = 'HeyLoop: no workspace';
+        log('HeyLoop: no workspace');
+        await new Promise<void>((resolve) => {
+          wakeSleep = () => {
+            wakeSleep = undefined;
+            resolve();
+          };
+        });
+        continue;
+      }
+
       const controller = new AbortController();
       currentAbort = controller;
 
@@ -155,6 +197,8 @@ export function activate(context: vscode.ExtensionContext): void {
         const config = loadConfig();
         const windowId = vscode.env.sessionId.slice(0, 64);
         const windowName = (vscode.workspace.name ?? 'Untitled window').slice(0, 120);
+        const rawFolder = workspaceFolders[0]?.uri.fsPath ?? workspaceFile?.fsPath;
+        const folder = rawFolder ? rawFolder.slice(0, 1024) : undefined;
         const workspaceStorageDir = context.storageUri ? dirname(context.storageUri.fsPath) : undefined;
         const eventCtx: EventContext = {
           config,
@@ -163,11 +207,14 @@ export function activate(context: vscode.ExtensionContext): void {
           enqueuePrompt,
           log,
         };
-        const url = new URL('/api/windows/events', `http://127.0.0.1:${config.port}`);
-        url.searchParams.set('id', windowId);
-        url.searchParams.set('name', windowName);
+        const url = eventsUrl(config.port, {
+          id: windowId,
+          name: windowName,
+          workspace,
+          ...(folder ? { folder } : {}),
+        });
 
-        log(`Connecting to 127.0.0.1:${config.port} as "${windowName}" (${windowId})`);
+        log(`Connecting to 127.0.0.1:${config.port} as "${windowName}" (${windowId}, workspace=${workspace})`);
         const res = await fetch(url, {
           headers: {
             Authorization: `Bearer ${config.token}`,
