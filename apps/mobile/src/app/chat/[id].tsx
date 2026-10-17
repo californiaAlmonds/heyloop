@@ -5,8 +5,17 @@ import { useEffect, useRef, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { ApprovalActions } from '@/components/ApprovalActions';
 import { Composer, RenameModal } from '@/components/Composer';
-import { useHeyLoop } from '@/lib/client';
-import { STATUS_COLORS, STATUS_LABELS, describe, formatTime, pendingApprovals } from '@/lib/format';
+import { client, useHeyLoop } from '@/lib/client';
+import {
+  STATUS_COLORS,
+  STATUS_LABELS,
+  chatLocationLabel,
+  chatWorkspace,
+  describe,
+  formatTime,
+  machineName,
+  pendingApprovals,
+} from '@/lib/format';
 
 const LEVEL_COLORS = { info: '#9aa0a6', progress: '#2f80ed', success: '#30a46c', warning: '#f2a20c', error: '#e5484d' };
 const HIGHLIGHT_COLOR = '#f2a20c';
@@ -26,6 +35,10 @@ export default function Conversation() {
   const { colors } = useTheme();
   const headerHeight = useHeaderHeight();
   const chat = snap.chats.find((c) => c.chat_id === id);
+  const workspace = chatWorkspace(chat, snap.workspaces);
+  const machine = machineName(snap);
+  const location = chatLocationLabel(workspace, machine);
+  const favourited = Boolean(chat && snap.favourites.has(chat.chat_id));
   const envelopes = snap.messages[id] ?? [];
   const pending = new Set(pendingApprovals(envelopes).map((r) => r.request_id));
   const requests = new Map(
@@ -54,9 +67,27 @@ export default function Conversation() {
           title: chat?.title ?? 'Chat',
           headerRight: () =>
             chat && (
-              <Pressable accessibilityRole="button" onPress={() => setRenaming(true)} hitSlop={8}>
-                <Text style={{ color: colors.primary, fontSize: 16 }}>Rename</Text>
-              </Pressable>
+              <View style={styles.headerActions}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={favourited ? 'Remove from favourites' : 'Add to favourites'}
+                  accessibilityState={{ selected: favourited }}
+                  onPress={() => client.toggleFavourite(chat.chat_id)}
+                  hitSlop={8}
+                >
+                  <Text style={[styles.star, { color: favourited ? HIGHLIGHT_COLOR : colors.text }]}>
+                    {favourited ? '★' : '☆'}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Rename chat"
+                  onPress={() => setRenaming(true)}
+                  hitSlop={8}
+                >
+                  <Text style={{ color: colors.primary, fontSize: 16 }}>Rename</Text>
+                </Pressable>
+              </View>
             ),
         }}
       />
@@ -64,6 +95,18 @@ export default function Conversation() {
         <View style={[styles.statusBar, { borderColor: colors.border }]}>
           <View style={[styles.dot, { backgroundColor: STATUS_COLORS[chat.status] }]} />
           <Text style={{ color: colors.text }}>{STATUS_LABELS[chat.status]}</Text>
+          {Boolean(location) && (
+            <Text style={[styles.location, { color: colors.text }]} numberOfLines={1}>
+              {location}
+            </Text>
+          )}
+        </View>
+      )}
+      {workspace && !workspace.open && (
+        <View style={styles.closedBanner}>
+          <Text style={styles.closedBannerText}>
+            {`${workspace.name} isn't open on ${machine}. Messages will be delivered when it opens.`}
+          </Text>
         </View>
       )}
       <FlatList
@@ -168,6 +211,8 @@ function Message(props: {
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  star: { fontSize: 20 },
   statusBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -177,6 +222,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   dot: { width: 10, height: 10, borderRadius: 5 },
+  location: { flex: 1, fontSize: 12, opacity: 0.65, textAlign: 'right' },
+  closedBanner: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#fff4d6',
+  },
+  closedBannerText: { color: '#5c4400', fontSize: 13 },
   list: { padding: 12, gap: 8 },
   system: { alignSelf: 'center', fontSize: 12, opacity: 0.6, marginVertical: 4 },
   bubble: {

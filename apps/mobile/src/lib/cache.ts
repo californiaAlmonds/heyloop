@@ -1,5 +1,6 @@
 import { Chat, Envelope } from '@heyloop/protocol';
 import { open, seal } from '@heyloop/protocol/crypto';
+import { Workspace } from '@heyloop/protocol/relay';
 import * as SQLite from 'expo-sqlite';
 
 const DB_NAME = 'heyloop-cache.db';
@@ -10,6 +11,7 @@ const SCHEMA = `
 PRAGMA journal_mode = WAL;
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY NOT NULL, v TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS chats (chat_id TEXT PRIMARY KEY NOT NULL, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS workspaces (workspace_id TEXT PRIMARY KEY NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS envelopes (
   chat_id TEXT NOT NULL,
   seq INTEGER NOT NULL,
@@ -17,12 +19,15 @@ CREATE TABLE IF NOT EXISTS envelopes (
   PRIMARY KEY (chat_id, seq)
 );
 CREATE TABLE IF NOT EXISTS cursors (chat_id TEXT PRIMARY KEY NOT NULL, seq INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS favourites (chat_id TEXT PRIMARY KEY NOT NULL);
 `;
 
 export interface Cached {
   chats: Chat[];
+  workspaces: Workspace[];
   messages: Record<string, Envelope[]>;
   cursors: Record<string, number>;
+  favourites: string[];
 }
 
 export interface CacheWrite {
@@ -62,10 +67,12 @@ export class Cache {
       const stored = await db.getFirstAsync<{ v: string }>('SELECT v FROM meta WHERE k = ?', 'room');
       if (stored?.v !== room) {
         await db.withTransactionAsync(async () => {
-          await db.execAsync('DELETE FROM chats; DELETE FROM envelopes; DELETE FROM cursors; DELETE FROM meta;');
+          await db.execAsync(
+            'DELETE FROM chats; DELETE FROM workspaces; DELETE FROM envelopes; DELETE FROM cursors; DELETE FROM favourites; DELETE FROM meta;',
+          );
           await db.runAsync('INSERT INTO meta (k, v) VALUES (?, ?)', 'room', room);
         });
-        return { chats: [], messages: {}, cursors: {} };
+        return { chats: [], workspaces: [], messages: {}, cursors: {}, favourites: [] };
       }
       return this.load(db, key);
     });
@@ -95,18 +102,55 @@ export class Cache {
     });
   }
 
+  setWorkspaces(workspaces: Workspace[]): void {
+    const { session, epoch } = this;
+    if (!session) return;
+    void this.enqueue(epoch, async (db) => {
+      await db.withTransactionAsync(async () => {
+        await db.execAsync('DELETE FROM workspaces;');
+        for (const ws of workspaces) {
+          await db.runAsync(
+            'INSERT OR REPLACE INTO workspaces (workspace_id, data) VALUES (?, ?)',
+            ws.id,
+            seal(session.key, ws),
+          );
+        }
+      });
+    });
+  }
+
+  setFavourite(chatId: string, favourite: boolean): void {
+    const { session, epoch } = this;
+    if (!session) return;
+    void this.enqueue(epoch, async (db) => {
+      if (favourite) {
+        await db.runAsync('INSERT OR IGNORE INTO favourites (chat_id) VALUES (?)', chatId);
+      } else {
+        await db.runAsync('DELETE FROM favourites WHERE chat_id = ?', chatId);
+      }
+    });
+  }
+
   /** Removes everything and invalidates queued writes (unpair). */
   clear(): void {
     this.epoch++;
     this.session = undefined;
     void this.enqueue(null, async (db) => {
-      await db.execAsync('DELETE FROM chats; DELETE FROM envelopes; DELETE FROM cursors; DELETE FROM meta;');
+      await db.execAsync(
+        'DELETE FROM chats; DELETE FROM workspaces; DELETE FROM envelopes; DELETE FROM cursors; DELETE FROM favourites; DELETE FROM meta;',
+      );
     });
   }
 
   private async load(db: SQLite.SQLiteDatabase, key: Uint8Array): Promise<Cached> {
     const chatRows = await db.getAllAsync<{ data: string }>('SELECT data FROM chats');
     const chats = chatRows.flatMap((r) => unseal(Chat, key, r.data) ?? []);
+
+    const wsRows = await db.getAllAsync<{ data: string }>('SELECT data FROM workspaces');
+    const workspaces = wsRows.flatMap((r) => {
+      const ws = unseal(Workspace, key, r.data);
+      return ws ? [{ ...ws, open: false }] : [];
+    });
 
     const envRows = await db.getAllAsync<{ data: string }>(
       `SELECT data FROM (
@@ -129,7 +173,10 @@ export class Cache {
       while (seqs.has(reach + 1)) reach++;
       cursors[chat_id] = Math.min(seq, reach);
     }
-    return { chats, messages, cursors };
+
+    const favRows = await db.getAllAsync<{ chat_id: string }>('SELECT chat_id FROM favourites');
+    const favourites = favRows.map((r) => r.chat_id);
+    return { chats, workspaces, messages, cursors, favourites };
   }
 
   private database(): Promise<SQLite.SQLiteDatabase> {

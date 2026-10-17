@@ -17,6 +17,7 @@ export default function RootLayout() {
         <Stack.Screen name="index" options={{ title: 'HeyLoop' }} />
         <Stack.Screen name="new" options={{ title: 'New chat' }} />
         <Stack.Screen name="pair" options={{ title: 'Pair computer' }} />
+        <Stack.Screen name="workspace/[id]" options={{ title: 'Workspace' }} />
         <Stack.Screen name="chat/[id]" options={{ title: '' }} />
       </Stack>
       <StatusBar style="auto" />
