@@ -130,48 +130,56 @@ const withInbox = await call('send_status_update', { chat_id: status.chat_id, su
 check('phone message reaches inbox exactly once', withInbox.inbox.length === 1);
 
 const offlineChatId = ulid();
-phone.send({ type: 'new_chat', id: offlineChatId, workspace_id: 'unknown-window', text: 'Start task on missing window' });
+phone.send({ type: 'new_chat', id: offlineChatId, workspace_id: '00000000', text: 'Start task on missing window' });
 const offlineResult = await phone.waitFor((f) => f.type === 'result' && f.ref === offlineChatId);
 check(
   'new_chat with unknown window returns window_offline',
   offlineResult.type === 'result' && !offlineResult.ok && offlineResult.error === 'window_offline',
 );
 
+const makeSseReader = (res: Response) => {
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let sseBuf = '';
+  return async (match: (ev: ExtensionEvent) => boolean = () => true): Promise<ExtensionEvent | undefined> => {
+    while (true) {
+      const idx = sseBuf.indexOf('\n\n');
+      if (idx !== -1) {
+        const block = sseBuf.slice(0, idx);
+        sseBuf = sseBuf.slice(idx + 2);
+        const dataLine = block.split('\n').find((line) => line.startsWith('data: '));
+        if (dataLine) {
+          const ev = ExtensionEvent.parse(JSON.parse(dataLine.slice(6)));
+          if (match(ev)) return ev;
+        }
+        continue;
+      }
+      const { value, done } = await reader.read();
+      if (done) return undefined;
+      sseBuf += decoder.decode(value, { stream: true });
+    }
+  };
+};
+
 const extAc = new AbortController();
 const winId = `win-${ulid()}`;
+const workspaceId = Buffer.from(ulid()).toString('hex').slice(0, 16);
 const extRes = await fetch(
-  `http://127.0.0.1:${config.port}/api/windows/events?id=${encodeURIComponent(winId)}&name=smoke-workspace`,
+  `http://127.0.0.1:${config.port}/api/windows/events?id=${encodeURIComponent(winId)}&name=smoke-workspace&workspace=${workspaceId}`,
   { headers: { Authorization: `Bearer ${config.token}` }, signal: extAc.signal },
 );
 const workspacesFrame = await phone.waitFor(
-  (f) => f.type === 'workspaces' && f.workspaces.some((w) => w.id === winId && w.name === 'smoke-workspace'),
+  (f) => f.type === 'workspaces' && f.workspaces.some((w) => w.id === workspaceId && w.name === 'smoke-workspace' && w.open === true),
 );
 check('phone receives workspaces frame listing connected window', workspacesFrame.type === 'workspaces');
 
 const newChatId = ulid();
-phone.send({ type: 'new_chat', id: newChatId, workspace_id: winId, text: 'Build new feature from phone' });
+phone.send({ type: 'new_chat', id: newChatId, workspace_id: workspaceId, text: 'Build new feature from phone' });
 const newChatResult = await phone.waitFor((f) => f.type === 'result' && f.ref === newChatId);
 
-const reader = extRes.body!.getReader();
-const decoder = new TextDecoder();
-let sseBuf = '';
-const readExtEvent = async (): Promise<ExtensionEvent | undefined> => {
-  while (true) {
-    const idx = sseBuf.indexOf('\n\n');
-    if (idx !== -1) {
-      const block = sseBuf.slice(0, idx);
-      sseBuf = sseBuf.slice(idx + 2);
-      const dataLine = block.split('\n').find((line) => line.startsWith('data: '));
-      if (dataLine) return ExtensionEvent.parse(JSON.parse(dataLine.slice(6)));
-      continue;
-    }
-    const { value, done } = await reader.read();
-    if (done) return undefined;
-    sseBuf += decoder.decode(value, { stream: true });
-  }
-};
+const readExtEvent = makeSseReader(extRes);
 
-const extEvent = await readExtEvent();
+const extEvent = await readExtEvent((ev) => ev.type === 'new_chat');
 check(
   'new_chat succeeds and emits extension event with chat_key in prompt',
   newChatResult.type === 'result' &&
@@ -183,10 +191,19 @@ check(
 
 const sessionId = `sess-${ulid()}`;
 await call('check_inbox', { chat_id: status.chat_id }, { 'vscode.conversationId': sessionId });
+const whoseEvent = await readExtEvent((ev) => ev.type === 'whose_session' && ev.session_id === sessionId);
+check('unclaimed session broadcasts whose_session to connected window', whoseEvent?.type === 'whose_session');
+const claimRes = await fetch(`http://127.0.0.1:${config.port}/api/windows/claim`, {
+  method: 'POST',
+  headers: { Authorization: `Bearer ${config.token}`, 'content-type': 'application/json' },
+  body: JSON.stringify({ window_id: winId, session_id: sessionId }),
+});
+check('window claims session and sets workspace_id on chat', claimRes.status === 200);
+
 const promptSayId = ulid();
 phone.send({ type: 'say', id: promptSayId, chat_id: status.chat_id, text: 'follow up into copilot chat' });
 await phone.waitFor((f) => f.type === 'result' && f.ref === promptSayId && f.ok);
-const promptEvent = await readExtEvent();
+const promptEvent = await readExtEvent((ev) => ev.type === 'prompt');
 check(
   'phone say on chat with session_id emits prompt event to connected window',
   promptEvent?.type === 'prompt' &&
@@ -202,6 +219,30 @@ const ackRes = await fetch(`http://127.0.0.1:${config.port}/api/windows/delivere
 const afterAck = await call('check_inbox', { chat_id: status.chat_id });
 check('delivered prompt is marked consumed and omitted from check_inbox', ackRes.status === 200 && afterAck.inbox.length === 0);
 extAc.abort();
+await phone.waitFor(
+  (f) => f.type === 'workspaces' && f.workspaces.some((w) => w.id === workspaceId && w.open === false),
+);
+
+const queuedSayId = ulid();
+phone.send({ type: 'say', id: queuedSayId, chat_id: status.chat_id, text: 'queued while workspace closed' });
+await phone.waitFor((f) => f.type === 'result' && f.ref === queuedSayId && f.ok);
+
+const extAc2 = new AbortController();
+const winId2 = `win-${ulid()}`;
+const extRes2 = await fetch(
+  `http://127.0.0.1:${config.port}/api/windows/events?id=${encodeURIComponent(winId2)}&name=smoke-workspace&workspace=${workspaceId}`,
+  { headers: { Authorization: `Bearer ${config.token}` }, signal: extAc2.signal },
+);
+const readExtEvent2 = makeSseReader(extRes2);
+const queuedPrompt = await readExtEvent2((ev) => ev.type === 'prompt');
+check(
+  'queued say is delivered as a prompt when the window connects',
+  queuedPrompt?.type === 'prompt' &&
+    queuedPrompt.chat_id === status.chat_id &&
+    queuedPrompt.session_id === sessionId &&
+    queuedPrompt.text === 'queued while workspace closed',
+);
+extAc2.abort();
 
 await phone.close();
 await call('send_status_update', { chat_id: status.chat_id, summary: 'Sent while phone offline', level: 'warning' });

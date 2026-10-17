@@ -6,9 +6,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import type { Chat, ExtensionEvent } from '@heyloop/protocol';
 import { ApprovalBroker } from '../src/broker.js';
 import { createMcpServer } from '../src/mcp.js';
 import { Store } from '../src/store.js';
+import { WindowRegistry } from '../src/windows.js';
 
 function withTempDir(fn: (dir: string) => Promise<void> | void) {
   return async () => {
@@ -25,9 +27,9 @@ function withTempDir(fn: (dir: string) => Promise<void> | void) {
   };
 }
 
-describe('Store chat_key and migration', () => {
+describe('Store chat_key, workspace_id, workspaces table, and migration', () => {
   it(
-    'migrates an existing database without chat_key column and enforces unique partial index',
+    'migrates an existing database, persists workspaces, tracks workspace_id on chats, and queries sessions and unconsumed inbox',
     withTempDir((dir) => {
       const dbPath = join(dir, 'heyloop.db');
       const oldDb = new DatabaseSync(dbPath);
@@ -50,10 +52,19 @@ describe('Store chat_key and migration', () => {
 
       const store = new Store(dir, 'm1');
       assert.equal(store.getChat('old-1')?.title, 'Old chat');
+      assert.equal(store.getChat('old-1')?.workspace_id, undefined);
+      assert.equal('workspace_id' in store.getChat('old-1')!, false);
 
       const c1 = store.createChat('vscode', 'Task A', 'ws:task-a');
       assert.equal(store.getChatByKey('ws:task-a')?.chat_id, c1.chat_id);
       assert.equal('chat_key' in c1, false);
+      assert.equal('workspace_id' in c1, false);
+
+      // createChat with workspace_id includes workspace_id in returned Chat and toChat
+      const cWithWs = store.createChat('vscode', 'Task B', 'ws:task-b', 'aaaa1111');
+      assert.equal(cWithWs.workspace_id, 'aaaa1111');
+      assert.equal(store.getChat(cWithWs.chat_id)?.workspace_id, 'aaaa1111');
+      assert.equal(store.getChatWorkspace(cWithWs.chat_id), 'aaaa1111');
 
       // Multiple chats with no chat_key are allowed by the partial unique index.
       const u1 = store.createChat('vscode', 'Untitled 1');
@@ -70,33 +81,92 @@ describe('Store chat_key and migration', () => {
       store.setVscodeSession('old-1', 'sess-2');
       assert.equal(store.getVscodeSession('old-1'), 'sess-2');
 
-      // markConsumed only marks unconsumed user text messages; hasMessage validates existence.
+      // unclaimedSessions lists sessions on chats without workspace_id; setChatWorkspace sets workspace_id once and emits chat event.
+      store.setVscodeSession(cWithWs.chat_id, 'sess-claimed');
+      assert.deepEqual(store.unclaimedSessions(), ['sess-2']);
+
+      const emittedChats: Chat[] = [];
+      store.on('chat', (c) => emittedChats.push(c));
+      assert.equal(store.setChatWorkspace('old-1', 'bbbb2222'), true);
+      assert.equal(store.getChatWorkspace('old-1'), 'bbbb2222');
+      assert.equal(store.getChat('old-1')?.workspace_id, 'bbbb2222');
+      assert.equal(emittedChats.length, 1);
+      assert.equal(emittedChats[0]?.workspace_id, 'bbbb2222');
+
+      // Setting workspace_id again does not overwrite an existing workspace_id.
+      assert.equal(store.setChatWorkspace('old-1', 'cccc3333'), false);
+      assert.equal(store.getChatWorkspace('old-1'), 'bbbb2222');
+      assert.equal(emittedChats.length, 1);
+      assert.deepEqual(store.unclaimedSessions(), []);
+
+      // Queries by vscode session id and workspace id.
+      assert.deepEqual(
+        store.chatsByVscodeSession('sess-2').map((c) => c.chat_id),
+        ['old-1'],
+      );
+      assert.deepEqual(
+        store.chatsByWorkspace('bbbb2222').map((c) => c.chat_id),
+        ['old-1'],
+      );
+
+      // Workspaces upsert and persistence across Store reopen.
+      store.upsertWorkspace('aaaa1111', 'first-name', '/path/one');
+      store.upsertWorkspace('bbbb2222', 'second-ws');
+      store.upsertWorkspace('aaaa1111', 'updated-name');
+      assert.equal(store.getWorkspace('aaaa1111')?.name, 'updated-name');
+      assert.equal(store.getWorkspace('aaaa1111')?.folder, '/path/one');
+      assert.equal(store.getWorkspace('bbbb2222')?.folder, undefined);
+
+      const reopened = new Store(dir, 'm1');
+      assert.equal(reopened.listWorkspaces().length, 2);
+      assert.equal(reopened.getWorkspace('aaaa1111')?.name, 'updated-name');
+      assert.equal(reopened.getWorkspace('aaaa1111')?.folder, '/path/one');
+      assert.equal(reopened.getChat('old-1')?.workspace_id, 'bbbb2222');
+
+      // peekInbox returns unconsumed user text messages in seq order without consuming; markConsumed marks one; takeInbox consumes rest.
       const agentMsg = store.append('old-1', 'agent', {
         kind: 'status',
         summary: 'hi',
         level: 'info',
         notify: false,
       });
-      const userMsg = store.append('old-1', 'user', { kind: 'text', text: 'hello' });
+      const userMsg1 = store.append('old-1', 'user', { kind: 'text', text: 'hello 1' });
+      const userMsg2 = store.append('old-1', 'user', { kind: 'text', text: 'hello 2' });
+      assert.deepEqual(
+        store.peekInbox('old-1').map((m) => m.text),
+        ['hello 1', 'hello 2'],
+      );
       assert.equal(store.hasMessage(agentMsg.id), true);
-      assert.equal(store.hasMessage(userMsg.id), true);
+      assert.equal(store.hasMessage(userMsg1.id), true);
       assert.equal(store.hasMessage('missing-msg'), false);
       assert.equal(store.markConsumed('missing-msg'), false);
       assert.equal(store.markConsumed(agentMsg.id), false);
-      assert.equal(store.markConsumed(userMsg.id), true);
-      assert.equal(store.markConsumed(userMsg.id), false);
+      assert.equal(store.markConsumed(userMsg1.id), true);
+      assert.equal(store.markConsumed(userMsg1.id), false);
+      assert.deepEqual(
+        store.peekInbox('old-1').map((m) => m.text),
+        ['hello 2'],
+      );
+      assert.deepEqual(
+        store.takeInbox('old-1').map((m) => m.text),
+        ['hello 2'],
+      );
       assert.deepEqual(store.takeInbox('old-1'), []);
     }),
   );
 });
 
-describe('MCP chat_key resolution and inbox delivery', () => {
+describe('MCP chat_key resolution, inbox delivery, and whose_session broadcast', () => {
   it(
-    'reuses chat_key, prioritizes chat_id over chat_key, and delivers inbox once across tools',
+    'reuses chat_key, prioritizes chat_id over chat_key, delivers inbox once, and broadcasts whose_session for unclaimed chats',
     withTempDir(async (dir) => {
       const store = new Store(dir, 'm1');
       const broker = new ApprovalBroker(store);
-      const mcp = createMcpServer(store, broker);
+      const windows = new WindowRegistry(store);
+      const broadcastEvents: ExtensionEvent[] = [];
+      windows.register({ id: 'w1', name: 'proj', workspace: 'aaaa1111' }, (ev) => broadcastEvents.push(ev));
+
+      const mcp = createMcpServer(store, broker, windows);
       const client = new Client({ name: 'vscode', version: '1.0.0' });
       const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
       await Promise.all([mcp.connect(serverTransport), client.connect(clientTransport)]);
@@ -179,7 +249,7 @@ describe('MCP chat_key resolution and inbox delivery', () => {
         ['msg before ask', 'msg before await'],
       );
 
-      // Captures _meta["vscode.conversationId"] on all four tools, updates when changed, ignores invalid values.
+      // Captures _meta["vscode.conversationId"] on all four tools, broadcasts whose_session when chat has no workspace_id.
       assert.equal(store.getVscodeSession(r1.chat_id), undefined);
       await call(
         'send_status_update',
@@ -187,6 +257,15 @@ describe('MCP chat_key resolution and inbox delivery', () => {
         { 'vscode.conversationId': 'dc621762-e451-4fab-ab81-c6be84cb738e' },
       );
       assert.equal(store.getVscodeSession(r1.chat_id), 'dc621762-e451-4fab-ab81-c6be84cb738e');
+      assert.deepEqual(broadcastEvents, [{ type: 'whose_session', session_id: 'dc621762-e451-4fab-ab81-c6be84cb738e' }]);
+
+      // Repeating the same session id does not broadcast again.
+      await call(
+        'check_inbox',
+        { chat_id: r1.chat_id },
+        { 'vscode.conversationId': 'dc621762-e451-4fab-ab81-c6be84cb738e' },
+      );
+      assert.equal(broadcastEvents.length, 1);
 
       // Invalid session ids are ignored and do not overwrite existing session id.
       await call(
@@ -201,16 +280,21 @@ describe('MCP chat_key resolution and inbox delivery', () => {
       );
       assert.equal(store.getVscodeSession(r1.chat_id), 'dc621762-e451-4fab-ab81-c6be84cb738e');
 
-      // Later call with a different valid id updates it across check_inbox, ask_human_approval, and await_human_response.
+      // Later call with a different valid id updates it and broadcasts whose_session while chat still has no workspace_id.
       await call('check_inbox', { chat_id: r1.chat_id }, { 'vscode.conversationId': 'session_2-abc' });
       assert.equal(store.getVscodeSession(r1.chat_id), 'session_2-abc');
+      assert.equal(broadcastEvents.length, 2);
+      assert.deepEqual(broadcastEvents[1], { type: 'whose_session', session_id: 'session_2-abc' });
 
+      // Once workspace_id is set on the chat, a new session id updates vscode_session_id without broadcasting whose_session.
+      store.setChatWorkspace(r1.chat_id, 'aaaa1111');
       const ask2 = await call(
         'ask_human_approval',
         { chat_id: r1.chat_id, question: 'Deploy?', risk: 'low', input: 'confirm', wait_seconds: 0 },
         { 'vscode.conversationId': 'session_3-def' },
       );
       assert.equal(store.getVscodeSession(r1.chat_id), 'session_3-def');
+      assert.equal(broadcastEvents.length, 2);
 
       await call(
         'await_human_response',
@@ -218,6 +302,7 @@ describe('MCP chat_key resolution and inbox delivery', () => {
         { 'vscode.conversationId': 'session_4-ghi' },
       );
       assert.equal(store.getVscodeSession(r1.chat_id), 'session_4-ghi');
+      assert.equal(broadcastEvents.length, 2);
 
       await client.close();
     }),
