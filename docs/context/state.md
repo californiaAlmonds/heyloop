@@ -46,10 +46,13 @@ Phase 1 (MVP): daemon **done** · relay **done (local)** · Android app **in pro
 1. Live loop verified 2026-10-16: a Copilot chat in VS Code posted a status and an approval through the deployed relay; the owner answered on the phone (dev APK + Metro LAN). Still to confirm: push doorbell with the app backgrounded/closed.
 2. Phone-started chats built 2026-10-16 (daemon window registry + SSE, `apps/vscode` extension installed from `apps/vscode/heyloop.vsix`, phone "New chat" screen with window picker; smoke:relay 12/12). Needs an on-device test: New chat → pick window → prompt starts a Copilot agent chat that reports into the same phone chat. VS Code tool confirmations still block unattended runs.
 3. Phone message → next prompt in the linked Copilot chat built 2026-10-16 (session id from `vscode.conversationId`, `prompt` event + delivery ack, inbox fallback; smoke:relay 14/14). Needs on-device test after a VS Code reload.
-3. Presence + 30s desktop-first routing gate and stall nudge.
-4. Cache limits: no pruning and only the newest 300 envelopes per chat are loaded (no lazy older history yet).
-5. Mobile `sync` cursors frame is unbatched (fine below ~10k chats; revisit only if chat counts grow).
-6. `smoke:relay` "offline messages are queued and delivered" failed once in 4 runs (timing flake); `daemon.log` has no rotation.
+4. Workspaces (Phase 1, 2026-10-17): stable workspace ids (extension: sha256 of the workspace file/folders), chats linked to workspaces via session claims, open/closed activity, replies to a closed workspace queued and replayed when it opens, phone home filter chips Chats / Workspaces / Favourites / Machines (favourites stored on the phone); smoke:relay 17/17.
+5. Multiple machines (Phase 2, 2026-10-18): phone pairs several computers — one relay connection, pairing secret (SecureStore) and sealed cache per room; all chat state keyed by room+chat_id; actions/retries/discards stay on the targeted room; Machines tab with Reconnect/Unpair/Add machine; legacy single pairing + favourites migrate. Reviewed LGTM by Verifier + Reviewer. Needs device test (incl. a second computer).
+6. EAS preview (standalone) build `da83259c` queued 2026-10-18 with Phases 1+2; previous preview (2026-10-17) predates them.
+7. Presence + 30s desktop-first routing gate and stall nudge.
+8. Cache limits: no pruning and only the newest 300 envelopes per chat are loaded (no lazy older history yet).
+9. Mobile `sync` cursors frame is unbatched (fine below ~10k chats; revisit only if chat counts grow).
+10. `smoke:relay` "offline messages are queued and delivered" failed once in 4 runs (timing flake); `daemon.log` has no rotation.
 
 ## Open items
 - `LICENSE` file — needs copyright holder name (package.json says MIT).
