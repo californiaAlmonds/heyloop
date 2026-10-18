@@ -1,7 +1,6 @@
-import type { Chat } from '@heyloop/protocol';
 import { useRouter, useTheme } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { client, useHeyLoop } from '@/lib/client';
+import { chatKey, client, useHeyLoop, type PairedChat } from '@/lib/client';
 import {
   STATUS_COLORS,
   WORKSPACE_COLORS,
@@ -16,18 +15,19 @@ import {
 
 const STAR_COLOR = '#f2a20c';
 
-export function ChatRow({ chat }: { chat: Chat }) {
+export function ChatRow({ chat }: { chat: PairedChat }) {
   const snap = useHeyLoop();
   const router = useRouter();
   const { colors } = useTheme();
 
-  const envelopes = snap.messages[chat.chat_id] ?? [];
+  const key = chatKey(chat.room, chat.chat_id);
+  const envelopes = snap.messages[key] ?? [];
   const pending = pendingApprovals(envelopes).length;
   const last = envelopes.findLast((e) => describe(e.body));
-  const workspace = chatWorkspace(chat, snap.workspaces);
-  const machine = machineName(snap);
+  const workspace = chatWorkspace(chat, snap.machines);
+  const machine = machineName(chat, snap.machines);
   const subtitle = chatLocationLabel(workspace, machine);
-  const favourited = snap.favourites.has(chat.chat_id);
+  const favourited = snap.favourites.has(key);
   const favActionLabel = favourited ? 'Remove from favourites' : 'Add to favourites';
 
   return (
@@ -38,11 +38,11 @@ export function ChatRow({ chat }: { chat: Chat }) {
       accessibilityActions={[{ name: 'favourite', label: favActionLabel }]}
       onAccessibilityAction={(event) => {
         if (event.nativeEvent.actionName === 'favourite') {
-          client.toggleFavourite(chat.chat_id);
+          client.toggleFavourite(chat.room, chat.chat_id);
         }
       }}
-      onPress={() => router.push({ pathname: '/chat/[id]', params: { id: chat.chat_id } })}
-      onLongPress={() => client.toggleFavourite(chat.chat_id)}
+      onPress={() => router.push({ pathname: '/chat/[id]', params: { id: chat.chat_id, room: chat.room } })}
+      onLongPress={() => client.toggleFavourite(chat.room, chat.chat_id)}
       style={styles.row}
     >
       <View style={[styles.dot, { backgroundColor: STATUS_COLORS[chat.status] }]} />

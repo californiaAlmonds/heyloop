@@ -3,15 +3,18 @@ import { useEffect, useState } from 'react';
 import { Keyboard, KeyboardAvoidingView, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useHeyLoop } from '@/lib/client';
+import { chatMachine } from '@/lib/format';
 import { useAction } from '@/lib/use-action';
 
 const DANGER = '#e5484d';
 
-export function Composer({ chatId }: { chatId: string }) {
+export function Composer({ chatId, room }: { chatId: string; room: string }) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const snap = useHeyLoop();
-  const { busy, error, run } = useAction();
+  const chat = snap.chats.find((c) => c.room === room && c.chat_id === chatId);
+  const machine = chatMachine(chat ?? { room }, snap.machines);
+  const { busy, error, run } = useAction(room, chatId);
   const [text, setText] = useState('');
   const [keyboardOpen, setKeyboardOpen] = useState(Keyboard.isVisible());
   useEffect(() => {
@@ -23,16 +26,17 @@ export function Composer({ chatId }: { chatId: string }) {
     };
   }, []);
   const body = text.trim();
-  const online = snap.status === 'online';
+  const online = machine?.status === 'online';
+  const computerOnline = Boolean(machine?.computerOnline);
 
   const send = async () => {
     if (!body || busy) return;
-    if (await run(body, { type: 'say', chat_id: chatId, text: body })) setText('');
+    if (await run(body, { type: 'say', chat_id: chatId, text: body }, room, chatId)) setText('');
   };
 
   return (
     <View style={[styles.wrap, { borderColor: colors.border, paddingBottom: 8 + (keyboardOpen ? 0 : insets.bottom) }]}>
-      {online && !snap.computerOnline && (
+      {online && !computerOnline && (
         <Text style={[styles.hint, { color: colors.text }]}>Computer offline. Messages are delivered when it reconnects.</Text>
       )}
       {error && <Text style={styles.error}>{error}</Text>}
@@ -61,15 +65,20 @@ export function Composer({ chatId }: { chatId: string }) {
   );
 }
 
-export function RenameModal(props: { chatId: string; current: string; onClose: () => void }) {
+export function RenameModal(props: { chatId: string; room: string; current: string; onClose: () => void }) {
   const { colors } = useTheme();
-  const { busy, error, run } = useAction();
+  const { busy, error, run } = useAction(props.room, props.chatId);
   const [title, setTitle] = useState(props.current);
   const trimmed = title.trim();
 
   const save = async () => {
     if (!trimmed || busy) return;
-    if (trimmed === props.current || (await run(trimmed, { type: 'rename', chat_id: props.chatId, title: trimmed }))) props.onClose();
+    if (
+      trimmed === props.current ||
+      (await run(trimmed, { type: 'rename', chat_id: props.chatId, title: trimmed }, props.room, props.chatId))
+    ) {
+      props.onClose();
+    }
   };
 
   return (

@@ -1,32 +1,50 @@
 import { Stack, useLocalSearchParams, useRouter, useTheme } from 'expo-router';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { ChatRow } from '@/components/ChatRow';
-import { useHeyLoop } from '@/lib/client';
+import { chatKey, useHeyLoop } from '@/lib/client';
 import {
   OTHER_WORKSPACE_ID,
   WORKSPACE_COLORS,
   chatWorkspace,
   lastActivity,
-  machineName,
   workspaceOpenLabel,
 } from '@/lib/format';
 
 export default function WorkspaceScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, room } = useLocalSearchParams<{ id: string; room?: string }>();
   const snap = useHeyLoop();
   const router = useRouter();
   const { colors } = useTheme();
 
   const isOther = id === OTHER_WORKSPACE_ID;
-  const workspace = isOther ? undefined : snap.workspaces.find((w) => w.id === id);
+  const machineObj = room ? snap.machines.find((m) => m.room === room) : undefined;
+  const workspace = !isOther && id ? machineObj?.workspaces.find((w) => w.id === id) : undefined;
+  const hasRoomChats =
+    !isOther && Boolean(id && machineObj && snap.chats.some((c) => c.room === machineObj.room && c.workspace_id === id));
+
+  if (!id || !room || !machineObj || (!isOther && !workspace && !hasRoomChats)) {
+    return (
+      <View style={styles.fill}>
+        <Stack.Screen options={{ title: 'Workspace' }} />
+        <Text style={[styles.empty, { color: colors.text }]}>Workspace not found.</Text>
+      </View>
+    );
+  }
+
   const name = isOther ? 'Other' : (workspace?.name ?? 'Workspace');
-  const isOpen = !isOther && snap.status === 'online' && snap.computerOnline && Boolean(workspace?.open);
-  const machine = machineName(snap);
+  const isOpen = !isOther && machineObj.status === 'online' && machineObj.computerOnline && Boolean(workspace?.open);
+  const machine = machineObj.name;
 
   const chats = snap.chats
-    .filter((c) => (isOther ? !chatWorkspace(c, snap.workspaces) : c.workspace_id === id))
+    .filter((c) =>
+      isOther
+        ? c.room === machineObj.room && !chatWorkspace(c, snap.machines)
+        : c.room === machineObj.room && c.workspace_id === id,
+    )
     .sort((a, b) =>
-      lastActivity(b, snap.messages[b.chat_id]).localeCompare(lastActivity(a, snap.messages[a.chat_id])),
+      lastActivity(b, snap.messages[chatKey(b.room, b.chat_id)]).localeCompare(
+        lastActivity(a, snap.messages[chatKey(a.room, a.chat_id)]),
+      ),
     );
 
   return (
@@ -38,8 +56,14 @@ export default function WorkspaceScreen() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="New chat"
-              disabled={!isOpen}
-              onPress={() => router.push({ pathname: '/new', params: { workspace: id } })}
+              disabled={!isOpen || !machineObj}
+              onPress={() => {
+                if (!machineObj) return;
+                router.push({
+                  pathname: '/new',
+                  params: { workspace: id, room: machineObj.room },
+                });
+              }}
               hitSlop={8}
             >
               <Text style={[styles.headerAction, { color: colors.primary, opacity: isOpen ? 1 : 0.4 }]}>
@@ -64,7 +88,7 @@ export default function WorkspaceScreen() {
       )}
       <FlatList
         data={chats}
-        keyExtractor={(c) => c.chat_id}
+        keyExtractor={(c) => `${c.room}:${c.chat_id}`}
         ItemSeparatorComponent={() => <View style={[styles.separator, { backgroundColor: colors.border }]} />}
         ListEmptyComponent={
           <Text style={[styles.empty, { color: colors.text }]}>No chats in this workspace yet.</Text>

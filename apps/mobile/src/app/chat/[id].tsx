@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { ApprovalActions } from '@/components/ApprovalActions';
 import { Composer, RenameModal } from '@/components/Composer';
-import { client, useHeyLoop } from '@/lib/client';
+import { chatKey, client, useHeyLoop } from '@/lib/client';
 import {
   STATUS_COLORS,
   STATUS_LABELS,
@@ -30,16 +30,18 @@ function answerLabel(body: ApprovalResponse, quoted?: Envelope): string {
 }
 
 export default function Conversation() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, room } = useLocalSearchParams<{ id: string; room?: string }>();
   const snap = useHeyLoop();
   const { colors } = useTheme();
   const headerHeight = useHeaderHeight();
-  const chat = snap.chats.find((c) => c.chat_id === id);
-  const workspace = chatWorkspace(chat, snap.workspaces);
-  const machine = machineName(snap);
+  const machineObj = room ? snap.machines.find((m) => m.room === room) : undefined;
+  const chat = room && id ? snap.chats.find((c) => c.room === room && c.chat_id === id) : undefined;
+  const key = room && id ? chatKey(room, id) : undefined;
+  const workspace = chatWorkspace(chat, snap.machines);
+  const machine = machineName(chat, snap.machines);
   const location = chatLocationLabel(workspace, machine);
-  const favourited = Boolean(chat && snap.favourites.has(chat.chat_id));
-  const envelopes = snap.messages[id] ?? [];
+  const favourited = Boolean(key && snap.favourites.has(key));
+  const envelopes = key ? (snap.messages[key] ?? []) : [];
   const pending = new Set(pendingApprovals(envelopes).map((r) => r.request_id));
   const requests = new Map(
     envelopes.flatMap((e) => (e.body.kind === 'approval_request' ? [[e.body.request_id, e] as const] : [])),
@@ -50,6 +52,15 @@ export default function Conversation() {
   const list = useRef<FlatList<Envelope>>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
+
+  if (!room || !id || !machineObj || !chat) {
+    return (
+      <View style={styles.fill}>
+        <Stack.Screen options={{ title: 'Chat' }} />
+        <Text style={[styles.notFound, { color: colors.text }]}>Chat not found.</Text>
+      </View>
+    );
+  }
 
   const jumpTo = (envelopeId: string) => {
     const index = visible.findIndex((e) => e.id === envelopeId);
@@ -64,44 +75,41 @@ export default function Conversation() {
     <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={headerHeight} style={styles.fill}>
       <Stack.Screen
         options={{
-          title: chat?.title ?? 'Chat',
-          headerRight: () =>
-            chat && (
-              <View style={styles.headerActions}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={favourited ? 'Remove from favourites' : 'Add to favourites'}
-                  accessibilityState={{ selected: favourited }}
-                  onPress={() => client.toggleFavourite(chat.chat_id)}
-                  hitSlop={8}
-                >
-                  <Text style={[styles.star, { color: favourited ? HIGHLIGHT_COLOR : colors.text }]}>
-                    {favourited ? '★' : '☆'}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Rename chat"
-                  onPress={() => setRenaming(true)}
-                  hitSlop={8}
-                >
-                  <Text style={{ color: colors.primary, fontSize: 16 }}>Rename</Text>
-                </Pressable>
-              </View>
-            ),
+          title: chat.title,
+          headerRight: () => (
+            <View style={styles.headerActions}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={favourited ? 'Remove from favourites' : 'Add to favourites'}
+                accessibilityState={{ selected: favourited }}
+                onPress={() => client.toggleFavourite(chat.room, chat.chat_id)}
+                hitSlop={8}
+              >
+                <Text style={[styles.star, { color: favourited ? HIGHLIGHT_COLOR : colors.text }]}>
+                  {favourited ? '★' : '☆'}
+                </Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Rename chat"
+                onPress={() => setRenaming(true)}
+                hitSlop={8}
+              >
+                <Text style={{ color: colors.primary, fontSize: 16 }}>Rename</Text>
+              </Pressable>
+            </View>
+          ),
         }}
       />
-      {chat && (
-        <View style={[styles.statusBar, { borderColor: colors.border }]}>
-          <View style={[styles.dot, { backgroundColor: STATUS_COLORS[chat.status] }]} />
-          <Text style={{ color: colors.text }}>{STATUS_LABELS[chat.status]}</Text>
-          {Boolean(location) && (
-            <Text style={[styles.location, { color: colors.text }]} numberOfLines={1}>
-              {location}
-            </Text>
-          )}
-        </View>
-      )}
+      <View style={[styles.statusBar, { borderColor: colors.border }]}>
+        <View style={[styles.dot, { backgroundColor: STATUS_COLORS[chat.status] }]} />
+        <Text style={{ color: colors.text }}>{STATUS_LABELS[chat.status]}</Text>
+        {Boolean(location) && (
+          <Text style={[styles.location, { color: colors.text }]} numberOfLines={1}>
+            {location}
+          </Text>
+        )}
+      </View>
       {workspace && !workspace.open && (
         <View style={styles.closedBanner}>
           <Text style={styles.closedBannerText}>
@@ -125,6 +133,7 @@ export default function Conversation() {
         renderItem={({ item }) => (
           <Message
             envelope={item}
+            room={chat.room}
             pending={pending}
             highlighted={item.id === highlight}
             quoted={item.body.kind === 'approval_response' ? requests.get(item.body.request_id) : undefined}
@@ -132,20 +141,23 @@ export default function Conversation() {
           />
         )}
       />
-      {chat && <Composer chatId={chat.chat_id} />}
-      {renaming && chat && <RenameModal chatId={chat.chat_id} current={chat.title} onClose={() => setRenaming(false)} />}
+      <Composer chatId={chat.chat_id} room={chat.room} />
+      {renaming && (
+        <RenameModal chatId={chat.chat_id} room={chat.room} current={chat.title} onClose={() => setRenaming(false)} />
+      )}
     </KeyboardAvoidingView>
   );
 }
 
 function Message(props: {
   envelope: Envelope;
+  room: string;
   pending: Set<string>;
   highlighted: boolean;
   quoted?: Envelope;
   onQuotePress: (envelopeId: string) => void;
 }) {
-  const { envelope, pending, highlighted, quoted, onQuotePress } = props;
+  const { envelope, room, pending, highlighted, quoted, onQuotePress } = props;
   const { colors } = useTheme();
   const { body, sender, ts } = envelope;
 
@@ -193,7 +205,7 @@ function Message(props: {
               {body.command}
             </Text>
           )}
-          {pending.has(body.request_id) && <ApprovalActions request={body} />}
+          {pending.has(body.request_id) && <ApprovalActions request={body} room={room} />}
         </>
       ) : (
         <>
@@ -211,6 +223,7 @@ function Message(props: {
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
+  notFound: { padding: 24, textAlign: 'center', opacity: 0.6 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   star: { fontSize: 20 },
   statusBar: {

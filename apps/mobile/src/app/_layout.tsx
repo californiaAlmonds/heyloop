@@ -8,7 +8,7 @@ export default function RootLayout() {
   const scheme = useColorScheme();
 
   useEffect(() => {
-    void client.init();
+    void client.init().catch(() => undefined);
   }, []);
 
   return (

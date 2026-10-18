@@ -27,10 +27,10 @@ function useExpired(expiresAt: string): boolean {
 }
 
 /** Answer controls for a pending approval; the daemon stays the authority on expiry and first-answer-wins. */
-export function ApprovalActions({ request }: { request: Request }) {
+export function ApprovalActions({ request, room }: { request: Request; room: string }) {
   const { colors } = useTheme();
   const expired = useExpired(request.expires_at);
-  const { busy, error, run } = useAction();
+  const { busy, error, run } = useAction(room, request.request_id);
   const [sent, setSent] = useState(false);
   const [text, setText] = useState('');
 
@@ -38,7 +38,9 @@ export function ApprovalActions({ request }: { request: Request }) {
   if (sent) return <Text style={[styles.note, { color: colors.text }]}>Sent. Waiting for your computer to confirm…</Text>;
 
   const answer = async (key: string, payload: { option_id?: string; text?: string }) => {
-    if (await run(key, { type: 'answer', request_id: request.request_id, ...payload })) setSent(true);
+    if (await run(key, { type: 'answer', request_id: request.request_id, ...payload }, room, request.request_id)) {
+      setSent(true);
+    }
   };
 
   const choose = (option: Option) => {

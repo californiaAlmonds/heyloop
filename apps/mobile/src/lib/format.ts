@@ -24,18 +24,26 @@ export const STATUS_LABELS: Record<ChatStatus, string> = {
   error: 'Error',
 };
 
-export function chatWorkspace(
-  chat: Pick<Chat, 'workspace_id'> | undefined,
-  workspaces: Workspace[],
-): Workspace | undefined {
-  return chat?.workspace_id ? workspaces.find((w) => w.id === chat.workspace_id) : undefined;
+export function chatMachine<M extends { room: string }>(
+  chat: { room: string } | undefined,
+  machines: readonly M[],
+): M | undefined {
+  return chat ? machines.find((m) => m.room === chat.room) : undefined;
 }
 
-export function machineName(snap: {
-  machine: { name: string } | null;
-  pairing: { name: string } | null;
-}): string {
-  return snap.machine?.name ?? snap.pairing?.name ?? 'Computer';
+export function chatWorkspace(
+  chat: (Pick<Chat, 'workspace_id'> & { room: string }) | undefined,
+  machines: readonly { room: string; workspaces: Workspace[] }[],
+): Workspace | undefined {
+  if (!chat?.workspace_id) return undefined;
+  return chatMachine(chat, machines)?.workspaces.find((w) => w.id === chat.workspace_id);
+}
+
+export function machineName(
+  chat: { room: string } | undefined,
+  machines: readonly { room: string; name: string }[],
+): string {
+  return chatMachine(chat, machines)?.name ?? 'Computer';
 }
 
 export function chatLocationLabel(
@@ -53,8 +61,16 @@ export function chatCountLabel(count: number): string {
   return `${count} chat${count === 1 ? '' : 's'}`;
 }
 
-export function workspaceCountLabel(count: number): string {
-  return `${count} workspace${count === 1 ? '' : 's'}`;
+export function workspaceCountLabel(count: number, openOnly = false): string {
+  return `${count} ${openOnly ? 'open ' : ''}workspace${count === 1 ? '' : 's'}`;
+}
+
+export function relayHost(relay: string): string {
+  try {
+    return new URL(relay).host;
+  } catch {
+    return relay;
+  }
 }
 
 export function describe(body: MessageBody): string | undefined {
