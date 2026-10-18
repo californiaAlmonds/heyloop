@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useRouter, useTheme } from 'expo-router';
 import { useHeaderHeight } from 'expo-router/react-navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Keyboard, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useHeyLoop } from '@/lib/client';
@@ -9,27 +9,62 @@ import { useAction } from '@/lib/use-action';
 const DANGER = '#e5484d';
 
 export default function NewChat() {
-  const { workspace: preselectedWorkspace } = useLocalSearchParams<{ workspace?: string }>();
+  const { workspace: preselectedWorkspace, room: preselectedRoom } = useLocalSearchParams<{
+    workspace?: string;
+    room?: string;
+  }>();
   const router = useRouter();
   const { colors } = useTheme();
   const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
   const snap = useHeyLoop();
-  const { busy, error, run } = useAction();
 
-  const openWorkspaces = snap.workspaces.filter((w) => w.open);
-  const sortedWorkspaces = [...snap.workspaces].sort(
-    (a, b) => Number(Boolean(b.open)) - Number(Boolean(a.open)) || a.name.localeCompare(b.name),
+  const allWorkspaces = snap.machines.flatMap((m) => {
+    const machineReady = m.status === 'online' && m.computerOnline;
+    return m.workspaces.map((w) => ({
+      key: `${m.room}:${w.id}`,
+      room: m.room,
+      machineName: m.name,
+      id: w.id,
+      name: w.name,
+      label: `${w.name} — ${m.name}`,
+      open: machineReady && Boolean(w.open),
+    }));
+  });
+  const openWorkspaces = allWorkspaces.filter((w) => w.open);
+  const sortedWorkspaces = [...allWorkspaces].sort(
+    (a, b) =>
+      Number(b.open) - Number(a.open) ||
+      a.name.localeCompare(b.name) ||
+      a.machineName.localeCompare(b.machineName),
   );
 
-  const [selectedId, setSelectedId] = useState<string | undefined>(() => {
-    if (preselectedWorkspace && openWorkspaces.some((w) => w.id === preselectedWorkspace)) {
-      return preselectedWorkspace;
-    }
-    return openWorkspaces.length === 1 ? openWorkspaces[0].id : undefined;
+  const hasExplicitTarget = Boolean(preselectedRoom || preselectedWorkspace);
+  const explicitKey =
+    preselectedRoom && preselectedWorkspace ? `${preselectedRoom}:${preselectedWorkspace}` : undefined;
+
+  const [selectedKey, setSelectedKey] = useState<string | undefined>(() => {
+    if (explicitKey) return explicitKey;
+    if (hasExplicitTarget) return undefined;
+    return openWorkspaces.length === 1 ? openWorkspaces[0].key : undefined;
   });
+  const userPicked = useRef(false);
+  const prevParams = useRef({ room: preselectedRoom, workspace: preselectedWorkspace });
   const [text, setText] = useState('');
   const [keyboardOpen, setKeyboardOpen] = useState(Keyboard.isVisible());
+
+  useEffect(() => {
+    if (prevParams.current.room !== preselectedRoom || prevParams.current.workspace !== preselectedWorkspace) {
+      prevParams.current = { room: preselectedRoom, workspace: preselectedWorkspace };
+      userPicked.current = false;
+      setSelectedKey(explicitKey);
+      return;
+    }
+    if (hasExplicitTarget || userPicked.current || selectedKey !== undefined) return;
+    if (openWorkspaces.length === 1) {
+      setSelectedKey(openWorkspaces[0].key);
+    }
+  }, [preselectedRoom, preselectedWorkspace, explicitKey, hasExplicitTarget, selectedKey, openWorkspaces]);
 
   useEffect(() => {
     const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardOpen(true));
@@ -40,20 +75,38 @@ export default function NewChat() {
     };
   }, []);
 
-  const workspaceId = openWorkspaces.some((w) => w.id === selectedId)
-    ? selectedId
-    : preselectedWorkspace && openWorkspaces.some((w) => w.id === preselectedWorkspace)
-      ? preselectedWorkspace
-      : openWorkspaces.length === 1
-        ? openWorkspaces[0].id
-        : undefined;
+  const selectedWorkspace = selectedKey ? allWorkspaces.find((w) => w.key === selectedKey) : undefined;
+  const separatorIdx = selectedKey ? selectedKey.indexOf(':') : -1;
+  const selectedRoom =
+    selectedWorkspace?.room ?? (separatorIdx > 0 ? selectedKey?.slice(0, separatorIdx) : preselectedRoom);
+  const selectedWorkspaceId =
+    selectedWorkspace?.id ?? (separatorIdx > 0 ? selectedKey?.slice(separatorIdx + 1) : preselectedWorkspace);
+  const { busy, error, run } = useAction(selectedRoom, selectedWorkspaceId);
+
+  const selectedUnavailableMessage =
+    selectedKey && !selectedWorkspace
+      ? !snap.loaded
+        ? 'Loading target workspace…'
+        : 'Selected workspace is unavailable. Pick another workspace to send.'
+      : selectedWorkspace && !selectedWorkspace.open
+        ? `${selectedWorkspace.label} is offline or closed. Pick another workspace to send.`
+        : hasExplicitTarget && !selectedKey
+          ? 'Selected workspace is unavailable. Pick another workspace to send.'
+          : undefined;
 
   const body = text.trim();
-  const canSend = snap.status === 'online' && snap.computerOnline && Boolean(workspaceId) && Boolean(body) && !busy;
+  const canSend = Boolean(selectedWorkspace?.open) && Boolean(body) && !busy;
 
   const send = async () => {
-    if (!workspaceId || !body || busy) return;
-    if (await run(`${workspaceId}:${body}`, { type: 'new_chat', workspace_id: workspaceId, text: body })) {
+    if (!selectedWorkspace?.open || !body || busy) return;
+    if (
+      await run(
+        body,
+        { type: 'new_chat', workspace_id: selectedWorkspace.id, text: body },
+        selectedWorkspace.room,
+        selectedWorkspace.id,
+      )
+    ) {
       if (router.canGoBack()) router.back();
       else router.replace('/');
     }
@@ -74,16 +127,19 @@ export default function NewChat() {
             )}
             <View style={styles.list}>
               {sortedWorkspaces.map((workspace) => {
-                const isOpen = Boolean(workspace.open);
-                const selected = isOpen && workspace.id === workspaceId;
+                const isOpen = workspace.open;
+                const selected = workspace.key === selectedKey;
                 return (
                   <Pressable
-                    key={workspace.id}
+                    key={workspace.key}
                     accessibilityRole="button"
-                    accessibilityLabel={isOpen ? workspace.name : `${workspace.name}, Closed`}
+                    accessibilityLabel={isOpen ? workspace.label : `${workspace.label}, Closed`}
                     accessibilityState={{ selected, disabled: !isOpen || busy }}
                     disabled={!isOpen || busy}
-                    onPress={() => setSelectedId(workspace.id)}
+                    onPress={() => {
+                      userPicked.current = true;
+                      setSelectedKey(workspace.key);
+                    }}
                     style={[
                       styles.item,
                       {
@@ -102,7 +158,7 @@ export default function NewChat() {
                       ]}
                     />
                     <Text style={[styles.itemName, { color: colors.text }]} numberOfLines={1}>
-                      {workspace.name}
+                      {workspace.label}
                     </Text>
                     {!isOpen && (
                       <Text style={[styles.closedLabel, { color: colors.text }]}>Closed</Text>
@@ -115,6 +171,7 @@ export default function NewChat() {
         )}
       </ScrollView>
       <View style={[styles.composer, { borderColor: colors.border, paddingBottom: 8 + (keyboardOpen ? 0 : insets.bottom) }]}>
+        {selectedUnavailableMessage && <Text style={styles.error}>{selectedUnavailableMessage}</Text>}
         {error && <Text style={styles.error}>{error}</Text>}
         <View style={styles.row}>
           <TextInput

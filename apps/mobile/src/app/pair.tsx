@@ -1,4 +1,4 @@
-import { parsePairingLink, type PairingLink } from '@heyloop/protocol/crypto';
+import { deriveKeys, parsePairingLink, type PairingLink } from '@heyloop/protocol/crypto';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { useLocalSearchParams, useRouter, useTheme } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -8,7 +8,7 @@ import { client, useHeyLoop } from '@/lib/client';
 export default function Pair() {
   const router = useRouter();
   const { colors } = useTheme();
-  const { pairing } = useHeyLoop();
+  const { machines } = useHeyLoop();
   const params = useLocalSearchParams<{ v?: string; r?: string; s?: string; n?: string }>();
   const [permission, requestPermission] = useCameraPermissions();
   const [candidate, setCandidate] = useState<PairingLink>();
@@ -49,7 +49,8 @@ export default function Pair() {
     setSaving(true);
     try {
       await client.pair(candidate);
-      router.replace('/');
+      if (router.canGoBack()) router.back();
+      else router.replace('/');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save pairing');
       setSaving(false);
@@ -57,6 +58,7 @@ export default function Pair() {
   };
 
   if (candidate) {
+    const existing = machines.find((m) => m.room === deriveKeys(candidate.secret).room);
     return (
       <View style={styles.center}>
         <Text style={[styles.heading, { color: colors.text }]}>Pair with “{candidate.name}”?</Text>
@@ -64,8 +66,10 @@ export default function Pair() {
         <Text style={[styles.body, { color: colors.text }]}>
           Only continue if this code is shown by your own computer.
         </Text>
-        {pairing && (
-          <Text style={[styles.body, { color: colors.text }]}>This replaces the pairing with “{pairing.name}”.</Text>
+        {existing && (
+          <Text style={[styles.body, { color: colors.text }]}>
+            “{existing.name}” is already paired. Continuing will re-pair this computer.
+          </Text>
         )}
         {error && <Text style={styles.error}>{error}</Text>}
         <View style={styles.actions}>
@@ -77,7 +81,11 @@ export default function Pair() {
             onPress={confirm}
             disabled={saving}
           >
-            {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Pair</Text>}
+            {saving ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.primaryText}>{existing ? 'Re-pair' : 'Pair'}</Text>
+            )}
           </Pressable>
         </View>
       </View>
