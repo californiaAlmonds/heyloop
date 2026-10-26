@@ -107,5 +107,5 @@ If you are running as the Scout, Verifier, or Reviewer subagent, ignore this sec
   - you've edited 4 or more files since the last checkpoint
   - right before starting a big new phase
 
-  To checkpoint, read `.github/prompts/checkpoint.prompt.md` and follow its steps, but skip its final reply line. Don't checkpoint after small edits.
+  To checkpoint, read `.github/skills/checkpoint/SKILL.md` and follow its steps, but skip its final reply line. Don't checkpoint after small edits.
 - You can't run `/compact` yourself. When you've just checkpointed and the next step doesn't need the earlier file contents or tool output from this chat, end your reply with: `Progress saved. Safe to /compact.` Otherwise don't suggest it.

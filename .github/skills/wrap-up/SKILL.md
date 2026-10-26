@@ -1,6 +1,8 @@
----
+﻿---
+name: wrap-up
 description: "Update docs/context (state, decisions, architecture) with what changed this session"
-agent: "agent"
+user-invocable: true
+disable-model-invocation: true
 ---
 Update the project context files so the next session can start without this chat history.
 

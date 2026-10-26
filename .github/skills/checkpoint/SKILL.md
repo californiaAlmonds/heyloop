@@ -1,6 +1,8 @@
----
+﻿---
+name: checkpoint
 description: "Save a compact progress snapshot so you can /compact or start a fresh chat without losing the thread."
-agent: agent
+user-invocable: true
+disable-model-invocation: true
 ---
 Write a checkpoint of the current work to `/memories/repo/progress.md` with the memory tool. Replace the file if it exists. Keep it to 40 lines or fewer and use only facts, not narrative:
 
